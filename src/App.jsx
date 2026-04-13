@@ -12,6 +12,7 @@ import StockModule from './modules/StockModule'
 import FleetModule from './modules/FleetModule'
 import PeopleModule from './modules/PeopleModule'
 import AdminModule from './modules/AdminModule'
+import PortalModule from './modules/PortalModule'
 
 function AuthedApp({ session }) {
   const [activeModule, setActiveModule] = useState('home')
@@ -31,6 +32,7 @@ function AuthedApp({ session }) {
       case 'fleet':         return <FleetModule />
       case 'people':        return <PeopleModule />
       case 'admin':         return <AdminModule />
+      case 'portal':        return <PortalModule />
       default:              return <ComingSoon label={activeModule.charAt(0).toUpperCase() + activeModule.slice(1)} />
     }
   }
