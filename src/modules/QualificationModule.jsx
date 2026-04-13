@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { C, fmt } from '../data/constants'
 import { Badge, Icon, TableRow, ProgramTag, SectionTabs } from '../components/UI'
 import { ListView } from '../components/ListView'
-import { ASSESSMENTS, IA_DATA, EFR_DATA } from '../data/mockData'
+import { fetchAssessments, fetchIncentiveApplications, fetchEfrReports } from '../data/qualificationService'
 
 const SECTIONS = [
   { id:'home',        label:'Home'                   },
@@ -65,16 +65,16 @@ const IA_VIEWS = [
 ]
 const EFR_VIEWS = [{ id:'EV-01', name:'All EFR Reports', filters:[], sortField:'scheduledDate', sortDir:'asc' }]
 
-function QualHome({ setSec }) {
-  const toReview = ASSESSMENTS.filter(a => a.status === 'Assessment Completed — To Be Reviewed')
-  const verified = ASSESSMENTS.filter(a => a.status === 'Assessment Verified')
-  const corrections = IA_DATA.filter(a => a.status === 'Incentive Application Corrections Needed')
-  const toPrepare = IA_DATA.filter(a => a.status === 'Incentive Application To Be Prepared' || a.status === 'Incentive Application To Be Verified' || a.status === 'Incentive Application To Be Submitted')
-  const approvedPipeline = IA_DATA.filter(a => a.status === 'Incentive Application Approved' || a.status === 'Incentive Application Pre-Approved').reduce((s,r) => s + (r.amount||0), 0)
+function QualHome({ setSec, assessments, applications, efrReports }) {
+  const toReview = assessments.filter(a => a.status === 'Assessment Completed — To Be Reviewed')
+  const verified = assessments.filter(a => a.status === 'Assessment Verified')
+  const corrections = applications.filter(a => a.status === 'Incentive Application Corrections Needed')
+  const toPrepare = applications.filter(a => a.status === 'Incentive Application To Be Prepared' || a.status === 'Incentive Application To Be Verified' || a.status === 'Incentive Application To Be Submitted')
+  const approvedPipeline = applications.filter(a => a.status === 'Incentive Application Approved' || a.status === 'Incentive Application Pre-Approved').reduce((s,r) => s + (r.amount||0), 0)
 
   const asmtByStatus = [
-    { name: 'To Be Scheduled', value: ASSESSMENTS.filter(a => a.status === 'Assessment To Be Scheduled').length },
-    { name: 'Scheduled',       value: ASSESSMENTS.filter(a => a.status === 'Assessment Scheduled').length },
+    { name: 'To Be Scheduled', value: assessments.filter(a => a.status === 'Assessment To Be Scheduled').length },
+    { name: 'Scheduled',       value: assessments.filter(a => a.status === 'Assessment Scheduled').length },
     { name: 'To Be Reviewed',  value: toReview.length },
     { name: 'Verified',        value: verified.length },
   ]
@@ -126,10 +126,10 @@ function QualHome({ setSec }) {
             <div style={{ padding:'10px 14px' }}>
               <ResponsiveContainer width="100%" height={120}>
                 <BarChart data={[
-                  { name:'To Prepare', value: IA_DATA.filter(a => a.status.includes('To Be')).length },
-                  { name:'Submitted',  value: IA_DATA.filter(a => a.status.includes('Submitted')).length },
-                  { name:'Pre-Approved',value:IA_DATA.filter(a => a.status === 'Incentive Application Pre-Approved').length },
-                  { name:'Approved',   value: IA_DATA.filter(a => a.status === 'Incentive Application Approved').length },
+                  { name:'To Prepare', value: applications.filter(a => a.status.includes('To Be')).length },
+                  { name:'Submitted',  value: applications.filter(a => a.status.includes('Submitted')).length },
+                  { name:'Pre-Approved',value:applications.filter(a => a.status === 'Incentive Application Pre-Approved').length },
+                  { name:'Approved',   value: applications.filter(a => a.status === 'Incentive Application Approved').length },
                   { name:'Corrections',value: corrections.length },
                 ]} margin={{ left:0, right:10, top:8, bottom:0 }}>
                   <XAxis dataKey="name" tick={{ fontSize:10, fill:C.textMuted }} tickLine={false} axisLine={false} />
@@ -192,7 +192,7 @@ function QualHome({ setSec }) {
 
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden' }}>
           <div style={{ padding:'12px 14px', borderBottom:`1px solid ${C.border}` }}><span style={{ fontWeight:600, fontSize:13, color:C.textPrimary }}>Recent Applications</span></div>
-          {IA_DATA.slice(0,5).map((a,i) => (
+          {applications.slice(0,5).map((a,i) => (
             <div key={a.id} style={{ padding:'9px 14px', borderBottom:i<4?`1px solid ${C.border}`:'none', cursor:'pointer' }}
               onMouseEnter={e => e.currentTarget.style.background='#f7f9fc'} onMouseLeave={e => e.currentTarget.style.background='transparent'}>
               <div style={{ color:'#1a5a8a', fontSize:11, fontWeight:500, marginBottom:2 }}>{a.id}</div>
@@ -207,10 +207,33 @@ function QualHome({ setSec }) {
   )
 }
 
+function LiveListView({ loading, error, data, ...rest }) {
+  if (loading) return <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:C.textMuted, fontSize:13 }}>Loading…</div>
+  if (error) return <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column', gap:8, padding:24 }}><div style={{ color:'#b03a2e', fontSize:13, fontWeight:600 }}>Could not load records</div><div style={{ color:C.textMuted, fontSize:12, fontFamily:'JetBrains Mono, monospace', maxWidth:560, textAlign:'center' }}>{String(error.message || error)}</div></div>
+  return <ListView data={data} {...rest} />
+}
+
 export default function QualificationModule() {
   const [sec, setSec] = useState('home')
-  const corrections = IA_DATA.filter(a => a.status === 'Incentive Application Corrections Needed').length
-  const counts = { assessments: ASSESSMENTS.length, applications: IA_DATA.length, efr: EFR_DATA.length }
+  const [assessments, setAssessments] = useState([])
+  const [applications, setApplications] = useState([])
+  const [efrReports, setEfrReports] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    Promise.all([fetchAssessments(), fetchIncentiveApplications(), fetchEfrReports()])
+      .then(([a, i, e]) => { if (!cancelled) { setAssessments(a); setApplications(i); setEfrReports(e) } })
+      .catch(err => { if (!cancelled) setError(err) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [])
+
+  const corrections = applications.filter(a => a.status === 'Incentive Application Corrections Needed').length
+  const counts = { assessments: assessments.length, applications: applications.length, efr: efrReports.length }
   const urgentSections = { home: corrections }
 
   return (
@@ -226,10 +249,10 @@ export default function QualificationModule() {
       </div>
       <SectionTabs sections={SECTIONS} active={sec} onChange={setSec} counts={counts} urgentSections={urgentSections} />
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
-        {sec==='home'         && <QualHome setSec={setSec} />}
-        {sec==='assessments'  && <ListView data={ASSESSMENTS} columns={ASMT_COLS} systemViews={ASMT_VIEWS} defaultViewId="AV-01" newLabel="Assessment"  onNew={() => {}} />}
-        {sec==='applications' && <ListView data={IA_DATA}     columns={IA_COLS}   systemViews={IA_VIEWS}   defaultViewId="IV-01" newLabel="Application" onNew={() => {}} />}
-        {sec==='efr'          && <ListView data={EFR_DATA}    columns={EFR_COLS}  systemViews={EFR_VIEWS}  defaultViewId="EV-01" newLabel="EFR Report"  onNew={() => {}} />}
+        {sec==='home'         && <QualHome setSec={setSec} assessments={assessments} applications={applications} efrReports={efrReports} />}
+        {sec==='assessments'  && <LiveListView loading={loading} error={error} data={assessments} columns={ASMT_COLS} systemViews={ASMT_VIEWS} defaultViewId="AV-01" newLabel="Assessment"  onNew={() => {}} />}
+        {sec==='applications' && <LiveListView loading={loading} error={error} data={applications} columns={IA_COLS}   systemViews={IA_VIEWS}   defaultViewId="IV-01" newLabel="Application" onNew={() => {}} />}
+        {sec==='efr'          && <LiveListView loading={loading} error={error} data={efrReports}  columns={EFR_COLS}  systemViews={EFR_VIEWS}  defaultViewId="EV-01" newLabel="EFR Report"  onNew={() => {}} />}
       </div>
     </div>
   )
