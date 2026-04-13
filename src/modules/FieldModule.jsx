@@ -1,9 +1,15 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { C, CHART_COLORS, fmt } from '../data/constants'
 import { Badge, Icon, TableRow, ProgramTag, SectionTabs } from '../components/UI'
 import { ListView } from '../components/ListView'
-import { PROJECTS, WORK_ORDERS, PROJECT_PAYMENT_REQUESTS, SCHEDULE_CREWS } from '../data/mockData'
+import { fetchProjects, fetchWorkOrders } from '../data/fieldService'
+import { fetchPaymentRequests } from '../data/incentivesService'
+
+// Schedule crews are a UI feature that will be driven by service_appointments
+// + crew assignments in a later pass. For now the schedule view shows an
+// empty state with this constant so nothing breaks.
+const SCHEDULE_CREWS = []
 
 const SECTIONS = [
   { id:'home',       label:'Home'         },
@@ -162,19 +168,19 @@ function ScheduleView() {
   )
 }
 
-function FieldHome({ setSec }) {
-  const toVerify    = WORK_ORDERS.filter(w => w.status === 'Work Order To Be Verified')
-  const corrections = WORK_ORDERS.filter(w => w.status === 'Work Order Corrections Needed')
-  const toSchedProj = PROJECTS.filter(p => p.status === 'Project To Be Scheduled')
-  const inProgress  = WORK_ORDERS.filter(w => w.status === 'Work Order In Progress')
+function FieldHome({ setSec, projects, workOrders, paymentRequests }) {
+  const toVerify    = workOrders.filter(w => w.status === 'Work Order To Be Verified')
+  const corrections = workOrders.filter(w => w.status === 'Work Order Corrections Needed')
+  const toSchedProj = projects.filter(p => p.status === 'Project To Be Scheduled')
+  const inProgress  = workOrders.filter(w => w.status === 'Work Order In Progress')
 
   const woByStatus = [
     { name:'In Progress',    value: inProgress.length },
-    { name:'Scheduled',      value: WORK_ORDERS.filter(w=>w.status==='Work Order Scheduled').length },
+    { name:'Scheduled',      value: workOrders.filter(w=>w.status==='Work Order Scheduled').length },
     { name:'To Be Verified', value: toVerify.length },
     { name:'Corrections',    value: corrections.length },
-    { name:'Complete',       value: WORK_ORDERS.filter(w=>w.status==='Work Order Complete').length },
-    { name:'Unscheduled',    value: WORK_ORDERS.filter(w=>w.status==='Work Order To Be Scheduled').length },
+    { name:'Complete',       value: workOrders.filter(w=>w.status==='Work Order Complete' || w.status==='Work Order Verified').length },
+    { name:'Unscheduled',    value: workOrders.filter(w=>w.status==='Work Order To Be Scheduled').length },
   ]
 
   return (
@@ -287,7 +293,7 @@ function FieldHome({ setSec }) {
 
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden' }}>
           <div style={{ padding:'12px 14px', borderBottom:`1px solid ${C.border}` }}><span style={{ fontWeight:600, fontSize:13, color:C.textPrimary }}>Project Payment Requests</span></div>
-          {PROJECT_PAYMENT_REQUESTS.filter(r=>r.daysOpen>14).slice(0,5).map((pr,i) => (
+          {paymentRequests.filter(r=>r.daysOpen>14).slice(0,5).map((pr,i) => (
             <div key={pr.id} style={{ padding:'9px 14px', borderBottom:i<4?`1px solid ${C.border}`:'none', cursor:'pointer' }}
               onMouseEnter={e => e.currentTarget.style.background='#f7f9fc'} onMouseLeave={e => e.currentTarget.style.background='transparent'}>
               <div style={{ color:pr.daysOpen>30?C.danger:'#1a5a8a', fontSize:11, fontWeight:600, marginBottom:2 }}>${Number(pr.amount).toLocaleString()} · {pr.daysOpen}d open</div>
@@ -302,8 +308,8 @@ function FieldHome({ setSec }) {
   )
 }
 
-function projRelatedList(row) {
-  const prs = PROJECT_PAYMENT_REQUESTS.filter(r => r.project === row.id)
+function projRelatedList(row, paymentRequests) {
+  const prs = paymentRequests.filter(r => r.name === row.name)
   if (prs.length === 0) return null
   return (
     <div style={{ marginTop:16 }}>
@@ -322,11 +328,67 @@ function projRelatedList(row) {
   )
 }
 
+function LiveListView({ loading, error, data, ...rest }) {
+  if (loading) return <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:C.textMuted, fontSize:13 }}>Loading…</div>
+  if (error) return <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column', gap:8, padding:24 }}><div style={{ color:'#b03a2e', fontSize:13, fontWeight:600 }}>Could not load records</div><div style={{ color:C.textMuted, fontSize:12, fontFamily:'JetBrains Mono, monospace', maxWidth:560, textAlign:'center' }}>{String(error.message || error)}</div></div>
+  return <ListView data={data} {...rest} />
+}
+
 export default function FieldModule() {
   const [sec, setSec] = useState('home')
-  const urgentCount = WORK_ORDERS.filter(w => w.status==='Work Order To Be Verified'||w.status==='Work Order Corrections Needed').length
-  const counts = { projects: PROJECTS.length, workorders: WORK_ORDERS.length }
+  const [projects, setProjects] = useState([])
+  const [workOrders, setWorkOrders] = useState([])
+  const [paymentRequests, setPaymentRequests] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    Promise.all([fetchProjects(), fetchWorkOrders(), fetchPaymentRequests()])
+      .then(([p, w, pr]) => { if (!cancelled) { setProjects(p); setWorkOrders(w); setPaymentRequests(pr) } })
+      .catch(err => { if (!cancelled) setError(err) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [])
+
+  const urgentCount = workOrders.filter(w => w.status==='Work Order To Be Verified'||w.status==='Work Order Corrections Needed').length
+  const counts = { projects: projects.length, workorders: workOrders.length }
   const urgentSections = { home: urgentCount }
+
+  // Project row detail renderer — shows all project fields plus any
+  // related payment requests in a side panel
+  const renderProjectDetail = row => {
+    const prs = paymentRequests.filter(r => r.name === row.name)
+    return (
+      <div>
+        <div>
+          {PROJ_COLS.filter(c => !['id','name','status'].includes(c.field)).map(col => (
+            <div key={col.field} style={{ display:'flex', justifyContent:'space-between', padding:'9px 0', borderBottom:`1px solid ${C.border}`, gap:12 }}>
+              <span style={{ color:C.textMuted, fontSize:12, flexShrink:0 }}>{col.label}</span>
+              <span style={{ color:C.textPrimary, fontSize:12, textAlign:'right' }}>{row[col.field] || '—'}</span>
+            </div>
+          ))}
+        </div>
+        {prs.length > 0 && (
+          <div style={{ marginTop:16 }}>
+            <div style={{ fontSize:11, fontWeight:700, color:C.textSecondary, textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:8 }}>Project Payment Requests</div>
+            {prs.map(pr => (
+              <div key={pr.id} style={{ background:C.page, borderRadius:6, padding:'9px 10px', marginBottom:6, border:`1px solid ${C.border}` }}>
+                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
+                  <span style={{ fontFamily:'JetBrains Mono, monospace', fontSize:10, color:C.textMuted }}>{pr.id}</span>
+                  <span style={{ color:pr.daysOpen>30?C.danger:C.textMuted, fontSize:10, fontWeight:pr.daysOpen>30?700:400 }}>{pr.daysOpen}d open</span>
+                </div>
+                <div style={{ fontSize:11, fontWeight:500, color:C.textPrimary, marginBottom:5 }}>${Number(pr.amount).toLocaleString()}</div>
+                <Badge s={pr.status} />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
@@ -341,9 +403,9 @@ export default function FieldModule() {
       </div>
       <SectionTabs sections={SECTIONS} active={sec} onChange={setSec} counts={counts} urgentSections={urgentSections} />
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
-        {sec==='home'       && <FieldHome setSec={setSec} />}
-        {sec==='projects'   && <ListView data={PROJECTS}     columns={PROJ_COLS} systemViews={PROJ_VIEWS} defaultViewId="PJV-01" newLabel="Project"    onNew={() => {}} renderDetail={projRelatedList ? (row) => { const prs = PROJECT_PAYMENT_REQUESTS.filter(r=>r.project===row.id); return (<div><div>{PROJ_COLS.filter(c=>!['id','name','status'].includes(c.field)).map(col=>(<div key={col.field} style={{display:'flex',justifyContent:'space-between',padding:'9px 0',borderBottom:`1px solid ${C.border}`,gap:12}}><span style={{color:C.textMuted,fontSize:12,flexShrink:0}}>{col.label}</span><span style={{color:C.textPrimary,fontSize:12,textAlign:'right'}}>{row[col.field]||'—'}</span></div>))}</div>{prs.length>0&&<div style={{marginTop:16}}><div style={{fontSize:11,fontWeight:700,color:C.textSecondary,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:8}}>Project Payment Requests</div>{prs.map(pr=>(<div key={pr.id} style={{background:C.page,borderRadius:6,padding:'9px 10px',marginBottom:6,border:`1px solid ${C.border}`}}><div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}><span style={{fontFamily:'JetBrains Mono, monospace',fontSize:10,color:C.textMuted}}>{pr.id}</span><span style={{color:pr.daysOpen>30?C.danger:C.textMuted,fontSize:10,fontWeight:pr.daysOpen>30?700:400}}>{pr.daysOpen}d open</span></div><div style={{fontSize:11,fontWeight:500,color:C.textPrimary,marginBottom:5}}>${Number(pr.amount).toLocaleString()}</div><Badge s={pr.status}/></div>))}</div>}</div>) } : undefined} />}
-        {sec==='workorders' && <ListView data={WORK_ORDERS} columns={WO_COLS}   systemViews={WO_VIEWS}   defaultViewId="WOV-01" newLabel="Work Order" onNew={() => {}} />}
+        {sec==='home'       && <FieldHome setSec={setSec} projects={projects} workOrders={workOrders} paymentRequests={paymentRequests} />}
+        {sec==='projects'   && <LiveListView loading={loading} error={error} data={projects}   columns={PROJ_COLS} systemViews={PROJ_VIEWS} defaultViewId="PJV-01" newLabel="Project"    onNew={() => {}} renderDetail={renderProjectDetail} />}
+        {sec==='workorders' && <LiveListView loading={loading} error={error} data={workOrders} columns={WO_COLS}   systemViews={WO_VIEWS}   defaultViewId="WOV-01" newLabel="Work Order" onNew={() => {}} />}
         {sec==='schedule'   && <ScheduleView />}
       </div>
     </div>
