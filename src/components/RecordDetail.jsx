@@ -169,6 +169,27 @@ function findMissingRequired(requiredFields, values, labelMap) {
   return missing
 }
 
+// Build the ordered list of tab names from the loaded sections.
+// Details first, Related second (if any section has related_list widgets),
+// then any custom tabs alphabetical after.
+function buildOrderedTabs(sections) {
+  const names = new Set()
+  let hasRelatedList = false
+  for (const sec of sections || []) {
+    names.add(sec.section_tab || 'Details')
+    if ((sec.widgets || []).some(w => w.widget_type === 'related_list')) {
+      hasRelatedList = true
+    }
+  }
+  if (hasRelatedList) names.add('Related')
+  const rank = (t) => t === 'Details' ? 0 : t === 'Related' ? 1 : 2
+  return [...names].sort((a, b) => {
+    const ra = rank(a), rb = rank(b)
+    if (ra !== rb) return ra - rb
+    return a.localeCompare(b)
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Delete confirmation modal
 // ---------------------------------------------------------------------------
@@ -382,7 +403,7 @@ function RelatedListWidget({ widget, picklists, onNavigateToRecord, parentRecord
     onNavigateToRecord({ table: childTable, id: null, mode: 'create', prefill: prefillObj })
   }
 
-  const title = widget.widget_label || config.label || 'Related'
+  const title = widget.widget_title || config.label || 'Related'
 
   return (
     <div style={{
@@ -581,6 +602,9 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const [allLookupOpts, setAllLookupOpts] = useState({})
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  // Which tab is active on the record detail page. Null until data loads,
+  // then initialized to the first tab (Details) by the useEffect below.
+  const [activeTab, setActiveTab] = useState(null)
   // When non-null, we are cloning the current record: same table, insert path,
   // draft pre-populated from the source.
   const [cloneSource, setCloneSource] = useState(null)
@@ -621,6 +645,22 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     }
     return () => { cancelled = true }
   }, [tableName, recordId, isCreate])
+
+  // When data first loads (or when the loaded record changes tables),
+  // pick the first tab as active. Only initializes — does not override
+  // user selection.
+  useEffect(() => {
+    if (!data?.sections) return
+    if (activeTab !== null) return
+    const tabs = buildOrderedTabs(data.sections)
+    if (tabs.length > 0) setActiveTab(tabs[0])
+  }, [data, activeTab])
+
+  // Reset active tab when switching records so the new record opens on
+  // its first tab rather than inheriting the previous record's selection.
+  useEffect(() => {
+    setActiveTab(null)
+  }, [tableName, recordId])
 
   const loadAllEditOpts = useCallback(async (sections) => {
     const pickFields = []
@@ -840,6 +880,10 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
 
   const { record, layout, sections, picklists, lookups } = data
 
+  // Build the ordered tab list from the loaded sections. Details first,
+  // Related second (if any section has related_list widgets), alphabetical after.
+  const orderedTabs = buildOrderedTabs(sections)
+
   const objectLabel = TABLE_META[tableName]?.label || tableName
   const displayName = isCreate
     ? `New ${objectLabel.replace(/s$/, '')}`
@@ -947,15 +991,47 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         </div>
       )}
 
-      {/* Sections — field groups only */}
-      {sections.map(sec => (
-        <Section key={sec.id} section={sec} record={record} picklists={picklists} lookups={lookups}
-          editing={editing} draft={draft} onChange={handleFieldChange}
-          allPicklistOpts={allPicklistOpts} allLookupOpts={allLookupOpts} tableName={tableName} />
-      ))}
+      {/* Tab bar — only shown when there's more than one tab. Styled to
+          match SectionTabs in UI.jsx: bottom border, 2px emerald underline
+          on the active tab. */}
+      {orderedTabs.length > 1 && (
+        <div style={{
+          background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
+          padding: '0 16px', marginBottom: 16, display: 'flex', alignItems: 'center',
+        }}>
+          {orderedTabs.map(t => {
+            const on = t === activeTab
+            return (
+              <button
+                key={t}
+                onClick={() => setActiveTab(t)}
+                style={{
+                  padding: '10px 16px', background: 'none', border: 'none',
+                  borderBottom: on ? `2px solid ${C.emerald}` : '2px solid transparent',
+                  color: on ? C.textPrimary : C.textMuted, fontSize: 13,
+                  fontWeight: on ? 500 : 400, cursor: 'pointer', marginBottom: -1,
+                  display: 'flex', alignItems: 'center', gap: 6,
+                }}
+              >
+                {t}
+              </button>
+            )
+          })}
+        </div>
+      )}
 
-      {/* Related lists — standalone Salesforce-style cards, in page order */}
-      {!isInsertMode && sections
+      {/* Sections — field groups only. Filter by active tab. */}
+      {sections
+        .filter(sec => (sec.section_tab || 'Details') === activeTab)
+        .map(sec => (
+          <Section key={sec.id} section={sec} record={record} picklists={picklists} lookups={lookups}
+            editing={editing} draft={draft} onChange={handleFieldChange}
+            allPicklistOpts={allPicklistOpts} allLookupOpts={allLookupOpts} tableName={tableName} />
+        ))}
+
+      {/* Related lists — standalone Salesforce-style cards, shown only on
+          the Related tab regardless of which section they came from. */}
+      {!isInsertMode && activeTab === 'Related' && sections
         .flatMap(sec => (sec.widgets || []).filter(w => w.widget_type === 'related_list'))
         .map(w => (
           <RelatedListWidget
