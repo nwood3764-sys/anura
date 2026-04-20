@@ -34,6 +34,78 @@ const inputBase = {
 const monoInput = { ...inputBase, fontFamily: 'JetBrains Mono, monospace' }
 
 // ---------------------------------------------------------------------------
+// Breadcrumb — Salesforce-style hierarchy path
+// ---------------------------------------------------------------------------
+
+const TABLE_META = {
+  contacts:                  { module: 'Outreach',       label: 'Contacts',            parents: ['property_owner_id', 'property_management_company_id'] },
+  properties:                { module: 'Outreach',       label: 'Properties',           parents: ['property_owner_id'] },
+  buildings:                 { module: 'Outreach',       label: 'Buildings',            parents: ['property_id'] },
+  units:                     { module: 'Outreach',       label: 'Units',                parents: ['building_id', 'property_id'] },
+  opportunities:             { module: 'Outreach',       label: 'Opportunities',        parents: ['property_id'] },
+  property_programs:         { module: 'Outreach',       label: 'Enrollment',           parents: ['property_id'] },
+  work_orders:               { module: 'Field',          label: 'Work Orders',          parents: ['project_id', 'property_id', 'building_id'] },
+  projects:                  { module: 'Field',          label: 'Projects',             parents: ['property_id'] },
+  assessments:               { module: 'Qualification',  label: 'Assessments',          parents: ['property_id', 'building_id'] },
+  incentive_applications:    { module: 'Qualification',  label: 'Applications',         parents: ['property_id'] },
+  efr_reports:               { module: 'Qualification',  label: 'EFR Reports',          parents: ['property_id'] },
+  project_payment_requests:  { module: 'Incentives',     label: 'Payment Requests',     parents: ['project_id', 'property_id'] },
+  payment_receipts:          { module: 'Incentives',     label: 'Payment Receipts',     parents: [] },
+  products:                  { module: 'Stock',          label: 'Product Catalog',      parents: [] },
+  product_items:             { module: 'Stock',          label: 'Inventory On-Hand',    parents: [] },
+  materials_requests:        { module: 'Stock',          label: 'Materials Requests',   parents: ['project_id'] },
+  equipment:                 { module: 'Stock',          label: 'Equipment',            parents: [] },
+  vehicles:                  { module: 'Fleet',          label: 'Vehicles',             parents: [] },
+  vehicle_activities:        { module: 'Fleet',          label: 'Activities',           parents: ['vehicle_id'] },
+  equipment_containers:      { module: 'Fleet',          label: 'Vehicle Kits',         parents: ['issued_to_vehicle_id'] },
+  users:                     { module: 'People',         label: 'Users',                parents: [] },
+  technicians:               { module: 'People',         label: 'Technicians',          parents: [] },
+  certifications:            { module: 'People',         label: 'Certifications',       parents: ['technician_id'] },
+  time_sheets:               { module: 'People',         label: 'Time Sheets',          parents: ['technician_id'] },
+  programs:                  { module: 'Admin',          label: 'Programs',             parents: [] },
+  work_types:                { module: 'Admin',          label: 'Work Types',           parents: [] },
+  email_templates:           { module: 'Admin',          label: 'Email Templates',      parents: [] },
+  document_templates:        { module: 'Admin',          label: 'Document Templates',   parents: [] },
+  automation_rules:          { module: 'Admin',          label: 'Automation Rules',     parents: [] },
+  validation_rules:          { module: 'Admin',          label: 'Validation Rules',     parents: [] },
+  roles:                     { module: 'Admin',          label: 'Roles',                parents: [] },
+  picklist_values:           { module: 'Admin',          label: 'Picklist Values',      parents: [] },
+  portal_users:              { module: 'Portal',         label: 'Portal Users',         parents: ['property_owner_id', 'partner_org_id'] },
+  partner_organizations:     { module: 'Portal',         label: 'Partners',             parents: [] },
+}
+
+function Breadcrumbs({ tableName, record, lookups, onBack }) {
+  const meta = TABLE_META[tableName] || { module: '—', label: tableName, parents: [] }
+
+  // Build parent chain from resolved lookups
+  const parentCrumbs = []
+  for (const fk of meta.parents) {
+    const val = record[fk]
+    if (val && lookups.has(val)) {
+      parentCrumbs.push(lookups.get(val))
+    }
+  }
+
+  const sep = <span style={{ color: C.textMuted, margin: '0 6px', fontSize: 10 }}>/</span>
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 2, marginBottom: 14 }}>
+      <span style={{ fontSize: 12, color: C.textMuted }}>{meta.module}</span>
+      {sep}
+      <button onClick={onBack} style={{ fontSize: 12, color: '#1a5a8a', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline', textUnderlineOffset: 2 }}>
+        {meta.label}
+      </button>
+      {parentCrumbs.map((name, i) => (
+        <span key={i} style={{ display: 'flex', alignItems: 'center' }}>
+          {sep}
+          <span style={{ fontSize: 12, color: C.textSecondary }}>{name}</span>
+        </span>
+      ))}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // EditField — renders the right input for a field type
 // ---------------------------------------------------------------------------
 
@@ -294,9 +366,7 @@ export default function RecordDetail({ tableName, recordId, onBack }) {
 
   if (!layout) return (
     <div style={{ flex: 1, overflow: 'auto', padding: '20px 24px' }}>
-      <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, fontSize: 12, marginBottom: 16, padding: 0 }}>
-        <Icon path="M15 19l-7-7 7-7" size={14} color={C.textMuted} /> Back to List
-      </button>
+      <Breadcrumbs tableName={tableName} record={record} lookups={lookups} onBack={onBack} />
       <h1 style={{ fontSize: 20, fontWeight: 700, color: C.textPrimary, margin: '0 0 16px' }}>{displayName}</h1>
       <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16 }}>
         <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 12 }}>No page layout configured for "{tableName}". Showing raw fields.</div>
@@ -312,9 +382,7 @@ export default function RecordDetail({ tableName, recordId, onBack }) {
 
   return (
     <div style={{ flex: 1, overflow: 'auto', padding: '20px 24px' }}>
-      <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, fontSize: 12, marginBottom: 16, padding: 0 }}>
-        <Icon path="M15 19l-7-7 7-7" size={14} color={C.textMuted} /> Back to List
-      </button>
+      <Breadcrumbs tableName={tableName} record={record} lookups={lookups} onBack={onBack} />
 
       {/* Header */}
       <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '20px 24px', marginBottom: 16, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
