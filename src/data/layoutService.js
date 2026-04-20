@@ -267,3 +267,46 @@ export async function fetchLookupOptions(lookupTable, lookupField, limit = 50) {
     label: r[lookupField] || r.id.slice(0, 8),
   }))
 }
+
+/**
+ * Fetch table metadata (required fields, soft-delete column, is-active column)
+ * via the anura_table_metadata(text) Postgres RPC. Results are cached in-memory
+ * for the life of the page load since the schema doesn't change at runtime.
+ *
+ * Returns { required_fields: string[], is_active_column: string|null,
+ *           is_deleted_column: string|null }
+ */
+const _metadataCache = new Map()
+export async function fetchTableMetadata(tableName) {
+  if (_metadataCache.has(tableName)) return _metadataCache.get(tableName)
+  const { data, error } = await supabase.rpc('anura_table_metadata', { p_table: tableName })
+  if (error) throw error
+  const meta = data || { required_fields: [], is_active_column: null, is_deleted_column: null }
+  // Normalise — the RPC may return nulls for the array fields
+  const normalised = {
+    required_fields:    meta.required_fields    || [],
+    is_active_column:   meta.is_active_column   || null,
+    is_deleted_column:  meta.is_deleted_column  || null,
+  }
+  _metadataCache.set(tableName, normalised)
+  return normalised
+}
+
+/**
+ * Soft-delete a record. Uses the metadata RPC to discover the correct
+ * `*_is_deleted` column for the table, then flips it to true. Never performs
+ * a hard DELETE — deleted records remain in the database until an admin
+ * purges them from the recycle bin.
+ */
+export async function deleteRecord(tableName, recordId) {
+  const meta = await fetchTableMetadata(tableName)
+  if (!meta.is_deleted_column) {
+    throw new Error(`No soft-delete column configured for "${tableName}"`)
+  }
+  const { error } = await supabase
+    .from(tableName)
+    .update({ [meta.is_deleted_column]: true })
+    .eq('id', recordId)
+  if (error) throw error
+  return { deleted: true, column: meta.is_deleted_column }
+}

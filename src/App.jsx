@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Sidebar, ComingSoon } from './components/UI'
 import AuthGate from './components/AuthGate'
+import { ToastProvider } from './components/Toast'
 import { C } from './data/constants'
 import { supabase } from './lib/supabase'
 import HomeModule from './modules/HomeModule'
@@ -55,7 +56,11 @@ function AuthedApp({ session }) {
 export default function App() {
   return (
     <AuthGate>
-      {(session) => <AuthedApp session={session} />}
+      {(session) => (
+        <ToastProvider>
+          <AuthedApp session={session} />
+        </ToastProvider>
+      )}
     </AuthGate>
   )
 }

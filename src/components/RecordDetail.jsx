@@ -1,7 +1,19 @@
 import { useState, useEffect, useCallback } from 'react'
 import { C } from '../data/constants'
 import { Badge, Icon } from './UI'
-import { loadRecordDetailData, saveRecord, insertRecord, fetchPicklistOptions, fetchLookupOptions, fetchPageLayout, loadPicklists as loadAllPicklists, getCurrentUserId } from '../data/layoutService'
+import { useToast } from './Toast'
+import {
+  loadRecordDetailData,
+  saveRecord,
+  insertRecord,
+  deleteRecord,
+  fetchTableMetadata,
+  fetchPicklistOptions,
+  fetchLookupOptions,
+  fetchPageLayout,
+  loadPicklists as loadAllPicklists,
+  getCurrentUserId,
+} from '../data/layoutService'
 
 // ---------------------------------------------------------------------------
 // Field value formatter
@@ -101,6 +113,124 @@ function Breadcrumbs({ tableName, record, lookups, onBack }) {
           <span style={{ fontSize: 12, color: C.textSecondary }}>{name}</span>
         </span>
       ))}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Validation helpers
+// ---------------------------------------------------------------------------
+
+// Known object prefixes so humanize() can strip them for readable error messages
+const FIELD_PREFIXES = [
+  'contact_', 'property_', 'opportunity_', 'work_order_', 'project_',
+  'building_', 'unit_', 'assessment_', 'vehicle_', 'va_', 'technician_',
+  'product_item_', 'product_', 'equipment_', 'ia_', 'ppr_', 'user_',
+]
+
+function humanizeFieldName(col) {
+  let name = col
+  for (const p of FIELD_PREFIXES) {
+    if (name.startsWith(p)) { name = name.slice(p.length); break }
+  }
+  if (name.endsWith('_id')) name = name.slice(0, -3)
+  return name
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .trim()
+}
+
+// Build a { fieldName → layoutLabel } map from the loaded page layout sections.
+function buildLabelMap(sections) {
+  const out = {}
+  for (const s of sections || []) {
+    for (const w of s.widgets || []) {
+      if (w.widget_type === 'field_group' && w.widget_config?.fields) {
+        for (const f of w.widget_config.fields) {
+          if (f?.name && f?.label) out[f.name] = f.label
+        }
+      }
+    }
+  }
+  return out
+}
+
+// Return an array of human-readable labels for required fields that are
+// missing from the provided values object. An empty string is treated as
+// missing; `false` and `0` are valid values.
+function findMissingRequired(requiredFields, values, labelMap) {
+  const missing = []
+  for (const f of requiredFields || []) {
+    const v = values?.[f]
+    if (v === null || v === undefined || v === '') {
+      missing.push(labelMap[f] || humanizeFieldName(f))
+    }
+  }
+  return missing
+}
+
+// ---------------------------------------------------------------------------
+// Delete confirmation modal
+// ---------------------------------------------------------------------------
+
+function DeleteConfirmModal({ objectLabel, recordName, onConfirm, onCancel, busy }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 600,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <div style={{
+        background: C.card, borderRadius: 10, padding: 26, width: 420,
+        boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 14 }}>
+          <div style={{
+            width: 32, height: 32, borderRadius: '50%',
+            background: '#fef2f2', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <Icon path="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z"
+              size={15} color="#b03a2e" />
+          </div>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: C.textPrimary, marginBottom: 4 }}>
+              Move to recycle bin?
+            </div>
+            <div style={{ fontSize: 13, color: C.textSecondary, lineHeight: 1.5 }}>
+              This will remove <strong style={{ color: C.textPrimary }}>{recordName || `this ${objectLabel.toLowerCase()}`}</strong> from all list views.
+              It stays in the recycle bin until an administrator purges it.
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+          <button
+            onClick={onConfirm}
+            disabled={busy}
+            style={{
+              flex: 1,
+              background: busy ? '#d0574a' : '#b03a2e',
+              color: '#fff', border: 'none', borderRadius: 6,
+              padding: '9px 0', fontSize: 13, fontWeight: 600,
+              cursor: busy ? 'wait' : 'pointer',
+              opacity: busy ? 0.8 : 1,
+            }}
+          >
+            {busy ? 'Deleting…' : 'Move to Recycle Bin'}
+          </button>
+          <button
+            onClick={onCancel}
+            disabled={busy}
+            style={{
+              flex: 1, background: C.page, color: C.textSecondary,
+              border: `1px solid ${C.border}`, borderRadius: 6,
+              padding: '9px 0', fontSize: 13, cursor: busy ? 'wait' : 'pointer',
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -295,15 +425,17 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
 
 export default function RecordDetail({ tableName, recordId, onBack, mode = 'view', onRecordCreated }) {
   const isCreate = mode === 'create'
+  const toast = useToast()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [editing, setEditing] = useState(isCreate)
   const [draft, setDraft] = useState({})
   const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState(null)
   const [allPicklistOpts, setAllPicklistOpts] = useState({})
   const [allLookupOpts, setAllLookupOpts] = useState({})
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -373,17 +505,17 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
 
   const startEditing = () => {
     if (!data?.record) return
-    setDraft({ ...data.record }); setSaveError(null); setEditing(true)
+    setDraft({ ...data.record }); setEditing(true)
     if (data.sections) loadAllEditOpts(data.sections)
   }
   const cancelEditing = () => {
     if (isCreate) { onBack(); return }
-    setEditing(false); setDraft({}); setSaveError(null)
+    setEditing(false); setDraft({})
   }
   const handleFieldChange = (name, value) => setDraft(prev => ({ ...prev, [name]: value }))
 
   const handleSave = async () => {
-    setSaving(true); setSaveError(null)
+    setSaving(true)
 
     if (isCreate) {
       // CREATE mode: build the insert payload with system fields
@@ -428,15 +560,34 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           if (v === '') fields[k] = null
         }
 
+        // Validate required fields *after* auto-fill so we don't flag
+        // system fields the user never saw.
+        const meta = await fetchTableMetadata(tableName)
+        const labelMap = buildLabelMap(data?.sections)
+        const missing = findMissingRequired(meta.required_fields, fields, labelMap)
+        if (missing.length) {
+          toast.error(
+            missing.length === 1
+              ? `Required field missing: ${missing[0]}`
+              : `Required fields missing:\n• ${missing.join('\n• ')}`
+          )
+          setSaving(false)
+          return
+        }
+
         const created = await insertRecord(tableName, fields)
+        toast.success('Record created')
 
         if (onRecordCreated) {
           onRecordCreated({ table: tableName, id: created.id })
         } else {
           onBack()
         }
-      } catch (err) { setSaveError(err.message || String(err)) }
-      finally { setSaving(false) }
+      } catch (err) {
+        toast.error(`Create failed — ${err.message || String(err)}`)
+      } finally {
+        setSaving(false)
+      }
       return
     }
 
@@ -448,12 +599,50 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       if (k.endsWith('_created_at') || k.endsWith('_created_by') || k.endsWith('_updated_at') || k.endsWith('_updated_by') || k.endsWith('_is_deleted')) delete changes[k]
     }
     if (!Object.keys(changes).length) { setEditing(false); setSaving(false); return }
+
+    // Normalise empty strings to null before validation + save
+    for (const [k, v] of Object.entries(changes)) {
+      if (v === '') changes[k] = null
+    }
+
     try {
+      // Validate against the merged view — existing record with pending changes applied
+      const meta = await fetchTableMetadata(tableName)
+      const labelMap = buildLabelMap(data?.sections)
+      const merged = { ...data.record, ...changes }
+      const missing = findMissingRequired(meta.required_fields, merged, labelMap)
+      if (missing.length) {
+        toast.error(
+          missing.length === 1
+            ? `Required field missing: ${missing[0]}`
+            : `Required fields missing:\n• ${missing.join('\n• ')}`
+        )
+        setSaving(false)
+        return
+      }
+
       const updated = await saveRecord(tableName, recordId, changes)
       setData(prev => ({ ...prev, record: updated }))
       setEditing(false); setDraft({})
-    } catch (err) { setSaveError(err.message || String(err)) }
-    finally { setSaving(false) }
+      toast.success('Changes saved')
+    } catch (err) {
+      toast.error(`Save failed — ${err.message || String(err)}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    setDeleting(true)
+    try {
+      await deleteRecord(tableName, recordId)
+      toast.success('Moved to recycle bin')
+      setShowDeleteConfirm(false)
+      onBack()
+    } catch (err) {
+      toast.error(`Delete failed — ${err.message || String(err)}`)
+      setDeleting(false)
+    }
   }
 
   if (loading) return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.textMuted, fontSize: 13 }}>Loading record…</div>
@@ -523,17 +712,24 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           </>) : (<>
             <button onClick={startEditing} style={{ background: C.emerald, color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer' }}>Edit</button>
             <button style={{ background: C.page, color: C.textSecondary, border: `1px solid ${C.border}`, borderRadius: 6, padding: '7px 16px', fontSize: 12.5, cursor: 'pointer', opacity: 0.5, pointerEvents: 'none' }}>Clone</button>
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              title="Move to recycle bin"
+              style={{
+                background: C.page, color: '#b03a2e',
+                border: `1px solid ${C.border}`, borderRadius: 6,
+                padding: '7px 12px', fontSize: 12.5, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 5,
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.borderColor = '#fca5a5' }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = C.page; e.currentTarget.style.borderColor = C.border }}
+            >
+              <Icon path="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z" size={13} color="#b03a2e" />
+              Delete
+            </button>
           </>)}
         </div>
       </div>
-
-      {/* Save error */}
-      {saveError && (
-        <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 8, padding: '12px 16px', marginBottom: 16 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: '#b03a2e', marginBottom: 3 }}>Save failed</div>
-          <div style={{ fontSize: 12, color: '#7f1d1d' }}>{saveError}</div>
-        </div>
-      )}
 
       {/* Editing indicator */}
       {editing && (
@@ -558,6 +754,17 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           editing={editing} draft={draft} onChange={handleFieldChange}
           allPicklistOpts={allPicklistOpts} allLookupOpts={allLookupOpts} tableName={tableName} />
       ))}
+
+      {/* Delete confirmation */}
+      {showDeleteConfirm && (
+        <DeleteConfirmModal
+          objectLabel={objectLabel}
+          recordName={displayName}
+          busy={deleting}
+          onConfirm={handleDelete}
+          onCancel={() => setShowDeleteConfirm(false)}
+        />
+      )}
     </div>
   )
 }
