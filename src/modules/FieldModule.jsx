@@ -3,6 +3,7 @@ import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveCo
 import { C, CHART_COLORS, fmt } from '../data/constants'
 import { Badge, Icon, TableRow, ProgramTag, SectionTabs } from '../components/UI'
 import { ListView } from '../components/ListView'
+import RecordDetail from '../components/RecordDetail'
 import { fetchProjects, fetchWorkOrders } from '../data/fieldService'
 import { fetchPaymentRequests } from '../data/incentivesService'
 
@@ -336,11 +337,16 @@ function LiveListView({ loading, error, data, ...rest }) {
 
 export default function FieldModule() {
   const [sec, setSec] = useState('home')
+  const [selectedRecord, setSelectedRecord] = useState(null)
   const [projects, setProjects] = useState([])
   const [workOrders, setWorkOrders] = useState([])
   const [paymentRequests, setPaymentRequests] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+
+  const SEC_TABLE = { projects: 'projects', workorders: 'work_orders' }
+  const openRecord = (row) => { if (row?._id && SEC_TABLE[sec]) setSelectedRecord({ table: SEC_TABLE[sec], id: row._id }) }
+  const closeRecord = () => setSelectedRecord(null)
 
   useEffect(() => {
     let cancelled = false
@@ -401,12 +407,16 @@ export default function FieldModule() {
           <Icon path="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" size={13} color={C.textSecondary}/>Reports
         </button>
       </div>
-      <SectionTabs sections={SECTIONS} active={sec} onChange={setSec} counts={counts} urgentSections={urgentSections} />
+      <SectionTabs sections={SECTIONS} active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} urgentSections={urgentSections} />
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
+        {selectedRecord ? (
+          <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord} />
+        ) : (<>
         {sec==='home'       && <FieldHome setSec={setSec} projects={projects} workOrders={workOrders} paymentRequests={paymentRequests} />}
-        {sec==='projects'   && <LiveListView loading={loading} error={error} data={projects}   columns={PROJ_COLS} systemViews={PROJ_VIEWS} defaultViewId="PJV-01" newLabel="Project"    onNew={() => {}} renderDetail={renderProjectDetail} />}
-        {sec==='workorders' && <LiveListView loading={loading} error={error} data={workOrders} columns={WO_COLS}   systemViews={WO_VIEWS}   defaultViewId="WOV-01" newLabel="Work Order" onNew={() => {}} />}
+        {sec==='projects'   && <LiveListView loading={loading} error={error} data={projects}   columns={PROJ_COLS} systemViews={PROJ_VIEWS} defaultViewId="PJV-01" newLabel="Project"    onNew={() => {}} onOpenRecord={openRecord} renderDetail={renderProjectDetail} />}
+        {sec==='workorders' && <LiveListView loading={loading} error={error} data={workOrders} columns={WO_COLS}   systemViews={WO_VIEWS}   defaultViewId="WOV-01" newLabel="Work Order" onNew={() => {}} onOpenRecord={openRecord} />}
         {sec==='schedule'   && <ScheduleView />}
+        </>)}
       </div>
     </div>
   )

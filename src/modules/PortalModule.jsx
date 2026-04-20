@@ -3,6 +3,7 @@ import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveCo
 import { C, CHART_COLORS } from '../data/constants'
 import { Icon, SectionTabs } from '../components/UI'
 import { ListView } from '../components/ListView'
+import RecordDetail from '../components/RecordDetail'
 import { fetchPortalUsers, fetchPartnerOrganizations } from '../data/portalService'
 
 const SECTIONS = [
@@ -193,6 +194,10 @@ function LiveListView({ loading, error, data, ...rest }) {
 
 export default function PortalModule() {
   const [sec, setSec] = useState('home')
+  const [selectedRecord, setSelectedRecord] = useState(null)
+  const SEC_TABLE = {'users': 'portal_users', 'partners': 'partner_organizations'}
+  const openRecord = (row) => { if (row?._id && SEC_TABLE[sec]) setSelectedRecord({ table: SEC_TABLE[sec], id: row._id }) }
+  const closeRecord = () => setSelectedRecord(null)
   const [users,    setUsers]    = useState([])
   const [partners, setPartners] = useState([])
   const [loading, setLoading] = useState(true)
@@ -223,11 +228,15 @@ export default function PortalModule() {
           <Icon path="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" size={13} color={C.textSecondary}/>Reports
         </button>
       </div>
-      <SectionTabs sections={SECTIONS} active={sec} onChange={setSec} counts={counts} />
+      <SectionTabs sections={SECTIONS} active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} />
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
+        {selectedRecord ? (
+          <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord} />
+        ) : (<>
         {sec==='home'     && <PortalHome setSec={setSec} users={users} partners={partners} />}
-        {sec==='users'    && <LiveListView loading={loading} error={error} data={users}    columns={USER_COLS}    systemViews={USER_VIEWS}    defaultViewId="PUV-01" newLabel="Portal User"           onNew={() => {}} />}
-        {sec==='partners' && <LiveListView loading={loading} error={error} data={partners} columns={PARTNER_COLS} systemViews={PARTNER_VIEWS} defaultViewId="POV-01" newLabel="Partner Organization"  onNew={() => {}} />}
+        {sec==='users'    && <LiveListView loading={loading} error={error} data={users}    columns={USER_COLS}    systemViews={USER_VIEWS}    defaultViewId="PUV-01" newLabel="Portal User"           onNew={() => {}}  onOpenRecord={openRecord}/>}
+        {sec==='partners' && <LiveListView loading={loading} error={error} data={partners} columns={PARTNER_COLS} systemViews={PARTNER_VIEWS} defaultViewId="POV-01" newLabel="Partner Organization"  onNew={() => {}}  onOpenRecord={openRecord}/>}
+        </>)}
       </div>
     </div>
   )

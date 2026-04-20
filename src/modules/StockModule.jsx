@@ -3,6 +3,7 @@ import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveCo
 import { C, CHART_COLORS, fmt } from '../data/constants'
 import { Badge, Icon, SectionTabs } from '../components/UI'
 import { ListView } from '../components/ListView'
+import RecordDetail from '../components/RecordDetail'
 import {
   fetchProducts,
   fetchProductItems,
@@ -232,6 +233,10 @@ function LiveListView({ loading, error, data, ...rest }) {
 
 export default function StockModule() {
   const [sec, setSec] = useState('home')
+  const [selectedRecord, setSelectedRecord] = useState(null)
+  const SEC_TABLE = {'inventory': 'product_items', 'products': 'products', 'requests': 'materials_requests', 'equipment': 'equipment'}
+  const openRecord = (row) => { if (row?._id && SEC_TABLE[sec]) setSelectedRecord({ table: SEC_TABLE[sec], id: row._id }) }
+  const closeRecord = () => setSelectedRecord(null)
   const [products,  setProducts]  = useState([])
   const [inventory, setInventory] = useState([])
   const [requests,  setRequests]  = useState([])
@@ -271,13 +276,17 @@ export default function StockModule() {
           <Icon path="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" size={13} color={C.textSecondary}/>Reports
         </button>
       </div>
-      <SectionTabs sections={SECTIONS} active={sec} onChange={setSec} counts={counts} urgentSections={urgentSections} />
+      <SectionTabs sections={SECTIONS} active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} urgentSections={urgentSections} />
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
+        {selectedRecord ? (
+          <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord} />
+        ) : (<>
         {sec==='home'      && <StockHome setSec={setSec} products={products} inventory={inventory} requests={requests} equipment={equipment} />}
-        {sec==='inventory' && <LiveListView loading={loading} error={error} data={inventory} columns={INV_COLS}  systemViews={INV_VIEWS}  defaultViewId="IV-01"  newLabel="Inventory Record" onNew={() => {}} />}
-        {sec==='products'  && <LiveListView loading={loading} error={error} data={products}  columns={PROD_COLS} systemViews={PROD_VIEWS} defaultViewId="PRV-01" newLabel="Product"          onNew={() => {}} />}
-        {sec==='requests'  && <LiveListView loading={loading} error={error} data={requests}  columns={REQ_COLS}  systemViews={REQ_VIEWS}  defaultViewId="RV-01"  newLabel="Materials Request" onNew={() => {}} />}
-        {sec==='equipment' && <LiveListView loading={loading} error={error} data={equipment} columns={EQ_COLS}   systemViews={EQ_VIEWS}   defaultViewId="EQV-01" newLabel="Equipment"        onNew={() => {}} />}
+        {sec==='inventory' && <LiveListView loading={loading} error={error} data={inventory} columns={INV_COLS}  systemViews={INV_VIEWS}  defaultViewId="IV-01"  newLabel="Inventory Record" onNew={() => {}}  onOpenRecord={openRecord}/>}
+        {sec==='products'  && <LiveListView loading={loading} error={error} data={products}  columns={PROD_COLS} systemViews={PROD_VIEWS} defaultViewId="PRV-01" newLabel="Product"          onNew={() => {}}  onOpenRecord={openRecord}/>}
+        {sec==='requests'  && <LiveListView loading={loading} error={error} data={requests}  columns={REQ_COLS}  systemViews={REQ_VIEWS}  defaultViewId="RV-01"  newLabel="Materials Request" onNew={() => {}}  onOpenRecord={openRecord}/>}
+        {sec==='equipment' && <LiveListView loading={loading} error={error} data={equipment} columns={EQ_COLS}   systemViews={EQ_VIEWS}   defaultViewId="EQV-01" newLabel="Equipment"        onNew={() => {}}  onOpenRecord={openRecord}/>}
+        </>)}
       </div>
     </div>
   )

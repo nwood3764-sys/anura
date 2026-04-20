@@ -3,6 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recha
 import { C } from '../data/constants'
 import { Icon, SectionTabs } from '../components/UI'
 import { ListView } from '../components/ListView'
+import RecordDetail from '../components/RecordDetail'
 import {
   fetchRoles,
   fetchPrograms,
@@ -250,6 +251,10 @@ function LiveListView({ loading, error, data, ...rest }) {
 
 export default function AdminModule() {
   const [sec, setSec] = useState('home')
+  const [selectedRecord, setSelectedRecord] = useState(null)
+  const SEC_TABLE = {'programs': 'programs', 'worktypes': 'work_types', 'emails': 'email_templates', 'documents': 'document_templates', 'automations': 'automation_rules', 'validations': 'validation_rules', 'roles': 'roles', 'picklists': 'picklist_values'}
+  const openRecord = (row) => { if (row?._id && SEC_TABLE[sec]) setSelectedRecord({ table: SEC_TABLE[sec], id: row._id }) }
+  const closeRecord = () => setSelectedRecord(null)
   const [roles,       setRoles]       = useState([])
   const [programs,    setPrograms]    = useState([])
   const [workTypes,   setWorkTypes]   = useState([])
@@ -304,17 +309,21 @@ export default function AdminModule() {
           <Icon path="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" size={13} color={C.textSecondary}/>Reports
         </button>
       </div>
-      <SectionTabs sections={SECTIONS} active={sec} onChange={setSec} counts={counts} />
+      <SectionTabs sections={SECTIONS} active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} />
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
+        {selectedRecord ? (
+          <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord} />
+        ) : (<>
         {sec==='home'        && <AdminHome setSec={setSec} roles={roles} programs={programs} workTypes={workTypes} emails={emails} documents={documents} automations={automations} validations={validations} picklists={picklists} />}
-        {sec==='programs'    && <LiveListView loading={loading} error={error} data={programs}    columns={PROG_COLS} systemViews={PROG_VIEWS}     defaultViewId="PV-01"  newLabel="Program"       onNew={() => {}} />}
-        {sec==='worktypes'   && <LiveListView loading={loading} error={error} data={workTypes}   columns={WT_COLS}   systemViews={ALL_V([])}      defaultViewId="AV"     newLabel="Work Type"     onNew={() => {}} />}
-        {sec==='emails'      && <LiveListView loading={loading} error={error} data={emails}      columns={ET_COLS}   systemViews={ET_VIEWS}       defaultViewId="ETV-01" newLabel="Email Template" onNew={() => {}} />}
-        {sec==='documents'   && <LiveListView loading={loading} error={error} data={documents}   columns={DT_COLS}   systemViews={ALL_V([])}      defaultViewId="AV"     newLabel="Document Template" onNew={() => {}} />}
-        {sec==='automations' && <LiveListView loading={loading} error={error} data={automations} columns={AR_COLS}   systemViews={AR_VIEWS}       defaultViewId="ARV-01" newLabel="Automation Rule" onNew={() => {}} />}
-        {sec==='validations' && <LiveListView loading={loading} error={error} data={validations} columns={VR_COLS}   systemViews={ALL_V([])}      defaultViewId="AV"     newLabel="Validation Rule" onNew={() => {}} />}
-        {sec==='roles'       && <LiveListView loading={loading} error={error} data={roles}       columns={ROLE_COLS} systemViews={ALL_V([])}      defaultViewId="AV"     newLabel="Role"          onNew={() => {}} />}
-        {sec==='picklists'   && <LiveListView loading={loading} error={error} data={picklists}   columns={PL_COLS}   systemViews={ALL_V([])}      defaultViewId="AV"     newLabel="Picklist Value" onNew={() => {}} />}
+        {sec==='programs'    && <LiveListView loading={loading} error={error} data={programs}    columns={PROG_COLS} systemViews={PROG_VIEWS}     defaultViewId="PV-01"  newLabel="Program"       onNew={() => {}}  onOpenRecord={openRecord}/>}
+        {sec==='worktypes'   && <LiveListView loading={loading} error={error} data={workTypes}   columns={WT_COLS}   systemViews={ALL_V([])}      defaultViewId="AV"     newLabel="Work Type"     onNew={() => {}}  onOpenRecord={openRecord}/>}
+        {sec==='emails'      && <LiveListView loading={loading} error={error} data={emails}      columns={ET_COLS}   systemViews={ET_VIEWS}       defaultViewId="ETV-01" newLabel="Email Template" onNew={() => {}}  onOpenRecord={openRecord}/>}
+        {sec==='documents'   && <LiveListView loading={loading} error={error} data={documents}   columns={DT_COLS}   systemViews={ALL_V([])}      defaultViewId="AV"     newLabel="Document Template" onNew={() => {}}  onOpenRecord={openRecord}/>}
+        {sec==='automations' && <LiveListView loading={loading} error={error} data={automations} columns={AR_COLS}   systemViews={AR_VIEWS}       defaultViewId="ARV-01" newLabel="Automation Rule" onNew={() => {}}  onOpenRecord={openRecord}/>}
+        {sec==='validations' && <LiveListView loading={loading} error={error} data={validations} columns={VR_COLS}   systemViews={ALL_V([])}      defaultViewId="AV"     newLabel="Validation Rule" onNew={() => {}}  onOpenRecord={openRecord}/>}
+        {sec==='roles'       && <LiveListView loading={loading} error={error} data={roles}       columns={ROLE_COLS} systemViews={ALL_V([])}      defaultViewId="AV"     newLabel="Role"          onNew={() => {}}  onOpenRecord={openRecord}/>}
+        {sec==='picklists'   && <LiveListView loading={loading} error={error} data={picklists}   columns={PL_COLS}   systemViews={ALL_V([])}      defaultViewId="AV"     newLabel="Picklist Value" onNew={() => {}}  onOpenRecord={openRecord}/>}
+        </>)}
       </div>
     </div>
   )

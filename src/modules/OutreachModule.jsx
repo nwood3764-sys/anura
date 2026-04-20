@@ -3,6 +3,7 @@ import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveCo
 import { C, CHART_COLORS, fmt } from '../data/constants'
 import { Badge, Icon, TableRow, ProgramTag, SectionTabs } from '../components/UI'
 import { ListView } from '../components/ListView'
+import RecordDetail from '../components/RecordDetail'
 import { OPPORTUNITIES, PROPERTIES, BUILDINGS, CONTACTS, ENROLLMENTS } from '../data/mockData'
 import { fetchProperties, fetchBuildings, fetchUnits, fetchOpportunities, fetchContacts, fetchEnrollments } from '../data/outreachService'
 
@@ -335,6 +336,25 @@ function LiveListView({ loading, error, data, ...rest }) {
 
 export default function OutreachModule() {
   const [sec, setSec] = useState('home')
+  const [selectedRecord, setSelectedRecord] = useState(null) // { table, id }
+
+  // Map section ID → Supabase table name for record detail
+  const SEC_TABLE_MAP = {
+    opps: 'opportunities',
+    properties: 'properties',
+    buildings: 'buildings',
+    units: 'units',
+    contacts: 'contacts',
+    enrollment: 'property_programs',
+  }
+
+  const openRecord = (row) => {
+    if (!row?._id) return
+    const table = SEC_TABLE_MAP[sec]
+    if (table) setSelectedRecord({ table, id: row._id })
+  }
+
+  const closeRecord = () => setSelectedRecord(null)
 
   // All six datasets are live from Supabase.
   const [properties, setProperties] = useState([])
@@ -398,16 +418,20 @@ export default function OutreachModule() {
         </button>
       </div>
 
-      <SectionTabs sections={SECTIONS} active={sec} onChange={s => setSec(s)} counts={counts} urgentSections={urgentSections} />
+      <SectionTabs sections={SECTIONS} active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} urgentSections={urgentSections} />
 
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
+        {selectedRecord ? (
+          <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord} />
+        ) : (<>
         {sec === 'home'       && <OutreachHome setSec={setSec} properties={properties} opportunities={opportunities} enrollments={enrollments} contacts={contacts} />}
-        {sec === 'opps'       && <LiveListView loading={loading} error={error} data={opportunities} columns={OPP_COLS}    systemViews={OPP_VIEWS}  defaultViewId="OV-01" newLabel="Opportunity" onNew={() => {}} />}
-        {sec === 'properties' && <LiveListView loading={loading} error={error} data={properties}   columns={PROP_COLS}   systemViews={PROP_VIEWS} defaultViewId="PV-01" newLabel="Property"    onNew={() => {}} />}
-        {sec === 'buildings'  && <LiveListView loading={loading} error={error} data={buildings}    columns={BLDG_COLS}   systemViews={BLDG_VIEWS} defaultViewId="BV-01" newLabel="Building"    onNew={() => {}} />}
-        {sec === 'units'      && <LiveListView loading={loading} error={error} data={units}        columns={UNIT_COLS}   systemViews={UNIT_VIEWS} defaultViewId="UV-01" newLabel="Unit"        onNew={() => {}} />}
-        {sec === 'contacts'   && <LiveListView loading={loading} error={error} data={contacts}     columns={CONTACT_COLS} systemViews={CONT_VIEWS} defaultViewId="CV-01" newLabel="Contact"    onNew={() => {}} renderCell={contactCell} />}
-        {sec === 'enrollment' && <LiveListView loading={loading} error={error} data={enrollments}  columns={ENR_COLS}    systemViews={ENR_VIEWS}  defaultViewId="EV-01" newLabel="Enrollment"  onNew={() => {}} renderCell={enrollmentCell} />}
+        {sec === 'opps'       && <LiveListView loading={loading} error={error} data={opportunities} columns={OPP_COLS}    systemViews={OPP_VIEWS}  defaultViewId="OV-01" newLabel="Opportunity" onNew={() => {}} onOpenRecord={openRecord} />}
+        {sec === 'properties' && <LiveListView loading={loading} error={error} data={properties}   columns={PROP_COLS}   systemViews={PROP_VIEWS} defaultViewId="PV-01" newLabel="Property"    onNew={() => {}} onOpenRecord={openRecord} />}
+        {sec === 'buildings'  && <LiveListView loading={loading} error={error} data={buildings}    columns={BLDG_COLS}   systemViews={BLDG_VIEWS} defaultViewId="BV-01" newLabel="Building"    onNew={() => {}} onOpenRecord={openRecord} />}
+        {sec === 'units'      && <LiveListView loading={loading} error={error} data={units}        columns={UNIT_COLS}   systemViews={UNIT_VIEWS} defaultViewId="UV-01" newLabel="Unit"        onNew={() => {}} onOpenRecord={openRecord} />}
+        {sec === 'contacts'   && <LiveListView loading={loading} error={error} data={contacts}     columns={CONTACT_COLS} systemViews={CONT_VIEWS} defaultViewId="CV-01" newLabel="Contact"    onNew={() => {}} onOpenRecord={openRecord} renderCell={contactCell} />}
+        {sec === 'enrollment' && <LiveListView loading={loading} error={error} data={enrollments}  columns={ENR_COLS}    systemViews={ENR_VIEWS}  defaultViewId="EV-01" newLabel="Enrollment"  onNew={() => {}} onOpenRecord={openRecord} renderCell={enrollmentCell} />}
+        </>)}
       </div>
     </div>
   )

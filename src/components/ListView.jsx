@@ -247,7 +247,7 @@ function SaveViewModal({ activeFilters, sortField, sortDir, cols, onSave, onClos
 }
 
 // ── Main ListView ────────────────────────────────────────────────────────────
-export function ListView({ data, columns, systemViews, defaultViewId, newLabel, renderCell, renderDetail, onNew }) {
+export function ListView({ data, columns, systemViews, defaultViewId, newLabel, renderCell, renderDetail, onNew, onOpenRecord }) {
   const firstView = systemViews.find(v => v.id === defaultViewId) || systemViews[0];
 
   const [sortField, setSortField] = useState(firstView?.sortField || null);
@@ -464,7 +464,7 @@ export function ListView({ data, columns, systemViews, defaultViewId, newLabel, 
             )}
 
             <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <button style={{ width: '100%', background: C.emerald, color: '#fff', border: 'none', borderRadius: 6, padding: 9, fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>Open Record</button>
+              <button onClick={() => onOpenRecord && onOpenRecord(selectedRow)} style={{ width: '100%', background: C.emerald, color: '#fff', border: 'none', borderRadius: 6, padding: 9, fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>Open Record</button>
               <button style={{ width: '100%', background: C.page, color: C.textSecondary, border: `1px solid ${C.border}`, borderRadius: 6, padding: 9, fontSize: 13, cursor: 'pointer' }}>Edit</button>
             </div>
           </div>

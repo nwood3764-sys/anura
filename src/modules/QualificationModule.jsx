@@ -3,6 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recha
 import { C, fmt } from '../data/constants'
 import { Badge, Icon, TableRow, ProgramTag, SectionTabs } from '../components/UI'
 import { ListView } from '../components/ListView'
+import RecordDetail from '../components/RecordDetail'
 import { fetchAssessments, fetchIncentiveApplications, fetchEfrReports } from '../data/qualificationService'
 
 const SECTIONS = [
@@ -215,6 +216,10 @@ function LiveListView({ loading, error, data, ...rest }) {
 
 export default function QualificationModule() {
   const [sec, setSec] = useState('home')
+  const [selectedRecord, setSelectedRecord] = useState(null)
+  const SEC_TABLE = {'assessments': 'assessments', 'applications': 'incentive_applications', 'efr': 'efr_reports'}
+  const openRecord = (row) => { if (row?._id && SEC_TABLE[sec]) setSelectedRecord({ table: SEC_TABLE[sec], id: row._id }) }
+  const closeRecord = () => setSelectedRecord(null)
   const [assessments, setAssessments] = useState([])
   const [applications, setApplications] = useState([])
   const [efrReports, setEfrReports] = useState([])
@@ -247,12 +252,16 @@ export default function QualificationModule() {
           <Icon path="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" size={13} color={C.textSecondary} />Reports
         </button>
       </div>
-      <SectionTabs sections={SECTIONS} active={sec} onChange={setSec} counts={counts} urgentSections={urgentSections} />
+      <SectionTabs sections={SECTIONS} active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} urgentSections={urgentSections} />
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
+        {selectedRecord ? (
+          <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord} />
+        ) : (<>
         {sec==='home'         && <QualHome setSec={setSec} assessments={assessments} applications={applications} efrReports={efrReports} />}
-        {sec==='assessments'  && <LiveListView loading={loading} error={error} data={assessments} columns={ASMT_COLS} systemViews={ASMT_VIEWS} defaultViewId="AV-01" newLabel="Assessment"  onNew={() => {}} />}
-        {sec==='applications' && <LiveListView loading={loading} error={error} data={applications} columns={IA_COLS}   systemViews={IA_VIEWS}   defaultViewId="IV-01" newLabel="Application" onNew={() => {}} />}
-        {sec==='efr'          && <LiveListView loading={loading} error={error} data={efrReports}  columns={EFR_COLS}  systemViews={EFR_VIEWS}  defaultViewId="EV-01" newLabel="EFR Report"  onNew={() => {}} />}
+        {sec==='assessments'  && <LiveListView loading={loading} error={error} data={assessments} columns={ASMT_COLS} systemViews={ASMT_VIEWS} defaultViewId="AV-01" newLabel="Assessment"  onNew={() => {}}  onOpenRecord={openRecord}/>}
+        {sec==='applications' && <LiveListView loading={loading} error={error} data={applications} columns={IA_COLS}   systemViews={IA_VIEWS}   defaultViewId="IV-01" newLabel="Application" onNew={() => {}}  onOpenRecord={openRecord}/>}
+        {sec==='efr'          && <LiveListView loading={loading} error={error} data={efrReports}  columns={EFR_COLS}  systemViews={EFR_VIEWS}  defaultViewId="EV-01" newLabel="EFR Report"  onNew={() => {}}  onOpenRecord={openRecord}/>}
+        </>)}
       </div>
     </div>
   )

@@ -3,6 +3,7 @@ import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveCo
 import { C, CHART_COLORS, fmt } from '../data/constants'
 import { Badge, Icon, TableRow, ProgramTag, SectionTabs } from '../components/UI'
 import { ListView } from '../components/ListView'
+import RecordDetail from '../components/RecordDetail'
 import { fetchPaymentRequests, fetchPaymentReceipts } from '../data/incentivesService'
 
 const SECTIONS = [
@@ -259,6 +260,10 @@ function LiveListView({ loading, error, data, ...rest }) {
 
 export default function IncentivesModule() {
   const [sec, setSec] = useState('home')
+  const [selectedRecord, setSelectedRecord] = useState(null)
+  const SEC_TABLE = {'requests': 'project_payment_requests', 'receipts': 'payment_receipts'}
+  const openRecord = (row) => { if (row?._id && SEC_TABLE[sec]) setSelectedRecord({ table: SEC_TABLE[sec], id: row._id }) }
+  const closeRecord = () => setSelectedRecord(null)
   const [requests, setRequests] = useState([])
   const [receipts, setReceipts] = useState([])
   const [loading, setLoading] = useState(true)
@@ -290,11 +295,15 @@ export default function IncentivesModule() {
           <Icon path="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" size={13} color={C.textSecondary}/>Reports
         </button>
       </div>
-      <SectionTabs sections={SECTIONS} active={sec} onChange={setSec} counts={counts} urgentSections={urgentSections} />
+      <SectionTabs sections={SECTIONS} active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} urgentSections={urgentSections} />
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
+        {selectedRecord ? (
+          <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord} />
+        ) : (<>
         {sec==='home'     && <IncentivesHome setSec={setSec} requests={requests} receipts={receipts} />}
-        {sec==='requests' && <LiveListView loading={loading} error={error} data={requests} columns={PR_COLS}  systemViews={PR_VIEWS}  defaultViewId="PRV-01" newLabel="Project Payment Request" onNew={()=>{}} renderCell={prCell} />}
-        {sec==='received' && <LiveListView loading={loading} error={error} data={receipts} columns={PMT_COLS} systemViews={PMT_VIEWS} defaultViewId="PTV-01" newLabel="Payment Receipt"         onNew={()=>{}} renderCell={pmtCell} />}
+        {sec==='requests' && <LiveListView loading={loading} error={error} data={requests} columns={PR_COLS}  systemViews={PR_VIEWS}  defaultViewId="PRV-01" newLabel="Project Payment Request" onNew={()=>{}} renderCell={prCell}  onOpenRecord={openRecord}/>}
+        {sec==='received' && <LiveListView loading={loading} error={error} data={receipts} columns={PMT_COLS} systemViews={PMT_VIEWS} defaultViewId="PTV-01" newLabel="Payment Receipt"         onNew={()=>{}} renderCell={pmtCell}  onOpenRecord={openRecord}/>}
+        </>)}
       </div>
     </div>
   )

@@ -3,6 +3,7 @@ import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveCo
 import { C, CHART_COLORS } from '../data/constants'
 import { Icon, SectionTabs } from '../components/UI'
 import { ListView } from '../components/ListView'
+import RecordDetail from '../components/RecordDetail'
 import {
   fetchUsers,
   fetchTechnicians,
@@ -232,6 +233,10 @@ function LiveListView({ loading, error, data, ...rest }) {
 
 export default function PeopleModule() {
   const [sec, setSec] = useState('home')
+  const [selectedRecord, setSelectedRecord] = useState(null)
+  const SEC_TABLE = {'users': 'users', 'technicians': 'technicians', 'certifications': 'certifications', 'timesheets': 'time_sheets'}
+  const openRecord = (row) => { if (row?._id && SEC_TABLE[sec]) setSelectedRecord({ table: SEC_TABLE[sec], id: row._id }) }
+  const closeRecord = () => setSelectedRecord(null)
   const [users,          setUsers]          = useState([])
   const [technicians,    setTechnicians]    = useState([])
   const [certifications, setCertifications] = useState([])
@@ -271,13 +276,17 @@ export default function PeopleModule() {
           <Icon path="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" size={13} color={C.textSecondary}/>Reports
         </button>
       </div>
-      <SectionTabs sections={SECTIONS} active={sec} onChange={setSec} counts={counts} urgentSections={urgentSections} />
+      <SectionTabs sections={SECTIONS} active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} urgentSections={urgentSections} />
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
+        {selectedRecord ? (
+          <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord} />
+        ) : (<>
         {sec==='home'           && <PeopleHome setSec={setSec} users={users} technicians={technicians} certifications={certifications} timesheets={timesheets} />}
-        {sec==='users'          && <LiveListView loading={loading} error={error} data={users}          columns={USER_COLS} systemViews={USER_VIEWS} defaultViewId="UV-01"  newLabel="User"          onNew={() => {}} />}
-        {sec==='technicians'    && <LiveListView loading={loading} error={error} data={technicians}    columns={TECH_COLS} systemViews={TECH_VIEWS} defaultViewId="TV-01"  newLabel="Technician"    onNew={() => {}} />}
-        {sec==='certifications' && <LiveListView loading={loading} error={error} data={certifications} columns={CERT_COLS} systemViews={CERT_VIEWS} defaultViewId="CV-01"  newLabel="Certification" onNew={() => {}} />}
-        {sec==='timesheets'     && <LiveListView loading={loading} error={error} data={timesheets}     columns={TS_COLS}   systemViews={TS_VIEWS}   defaultViewId="TSV-01" newLabel="Time Sheet"    onNew={() => {}} />}
+        {sec==='users'          && <LiveListView loading={loading} error={error} data={users}          columns={USER_COLS} systemViews={USER_VIEWS} defaultViewId="UV-01"  newLabel="User"          onNew={() => {}}  onOpenRecord={openRecord}/>}
+        {sec==='technicians'    && <LiveListView loading={loading} error={error} data={technicians}    columns={TECH_COLS} systemViews={TECH_VIEWS} defaultViewId="TV-01"  newLabel="Technician"    onNew={() => {}}  onOpenRecord={openRecord}/>}
+        {sec==='certifications' && <LiveListView loading={loading} error={error} data={certifications} columns={CERT_COLS} systemViews={CERT_VIEWS} defaultViewId="CV-01"  newLabel="Certification" onNew={() => {}}  onOpenRecord={openRecord}/>}
+        {sec==='timesheets'     && <LiveListView loading={loading} error={error} data={timesheets}     columns={TS_COLS}   systemViews={TS_VIEWS}   defaultViewId="TSV-01" newLabel="Time Sheet"    onNew={() => {}}  onOpenRecord={openRecord}/>}
+        </>)}
       </div>
     </div>
   )

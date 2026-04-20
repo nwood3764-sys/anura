@@ -3,6 +3,7 @@ import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveCo
 import { C, CHART_COLORS } from '../data/constants'
 import { Icon, SectionTabs } from '../components/UI'
 import { ListView } from '../components/ListView'
+import RecordDetail from '../components/RecordDetail'
 import { fetchVehicles, fetchVehicleActivities, fetchEquipmentContainers } from '../data/fleetService'
 
 const SECTIONS = [
@@ -212,6 +213,10 @@ function LiveListView({ loading, error, data, ...rest }) {
 
 export default function FleetModule() {
   const [sec, setSec] = useState('home')
+  const [selectedRecord, setSelectedRecord] = useState(null)
+  const SEC_TABLE = {'vehicles': 'vehicles', 'activities': 'vehicle_activities', 'kits': 'equipment_containers'}
+  const openRecord = (row) => { if (row?._id && SEC_TABLE[sec]) setSelectedRecord({ table: SEC_TABLE[sec], id: row._id }) }
+  const closeRecord = () => setSelectedRecord(null)
   const [vehicles,   setVehicles]   = useState([])
   const [activities, setActivities] = useState([])
   const [kits,       setKits]       = useState([])
@@ -245,12 +250,16 @@ export default function FleetModule() {
           <Icon path="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" size={13} color={C.textSecondary}/>Reports
         </button>
       </div>
-      <SectionTabs sections={SECTIONS} active={sec} onChange={setSec} counts={counts} urgentSections={urgentSections} />
+      <SectionTabs sections={SECTIONS} active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} urgentSections={urgentSections} />
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
+        {selectedRecord ? (
+          <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord} />
+        ) : (<>
         {sec==='home'       && <FleetHome setSec={setSec} vehicles={vehicles} activities={activities} kits={kits} />}
-        {sec==='vehicles'   && <LiveListView loading={loading} error={error} data={vehicles}   columns={VEH_COLS} systemViews={VEH_VIEWS} defaultViewId="VV-01" newLabel="Vehicle"  onNew={() => {}} />}
-        {sec==='activities' && <LiveListView loading={loading} error={error} data={activities} columns={ACT_COLS} systemViews={ACT_VIEWS} defaultViewId="AV-01" newLabel="Activity" onNew={() => {}} />}
-        {sec==='kits'       && <LiveListView loading={loading} error={error} data={kits}       columns={KIT_COLS} systemViews={KIT_VIEWS} defaultViewId="KV-01" newLabel="Kit"      onNew={() => {}} />}
+        {sec==='vehicles'   && <LiveListView loading={loading} error={error} data={vehicles}   columns={VEH_COLS} systemViews={VEH_VIEWS} defaultViewId="VV-01" newLabel="Vehicle"  onNew={() => {}}  onOpenRecord={openRecord}/>}
+        {sec==='activities' && <LiveListView loading={loading} error={error} data={activities} columns={ACT_COLS} systemViews={ACT_VIEWS} defaultViewId="AV-01" newLabel="Activity" onNew={() => {}}  onOpenRecord={openRecord}/>}
+        {sec==='kits'       && <LiveListView loading={loading} error={error} data={kits}       columns={KIT_COLS} systemViews={KIT_VIEWS} defaultViewId="KV-01" newLabel="Kit"      onNew={() => {}}  onOpenRecord={openRecord}/>}
+        </>)}
       </div>
     </div>
   )
