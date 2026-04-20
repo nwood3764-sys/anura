@@ -282,7 +282,9 @@ export default function PeopleModule() {
         {selectedRecord ? (
           <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord}
             mode={selectedRecord.mode || 'view'}
-            onRecordCreated={(r) => setSelectedRecord({ table: r.table, id: r.id })} />
+            onRecordCreated={(r) => setSelectedRecord({ table: r.table, id: r.id })}
+            prefill={selectedRecord.prefill}
+            onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
         {sec==='home'           && <PeopleHome setSec={setSec} users={users} technicians={technicians} certifications={certifications} timesheets={timesheets} />}
         {sec==='users'          && <LiveListView loading={loading} error={error} data={users}          columns={USER_COLS} systemViews={USER_VIEWS} defaultViewId="UV-01"  newLabel="User"          onNew={() => setSelectedRecord({ table: 'users', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}

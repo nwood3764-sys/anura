@@ -256,7 +256,9 @@ export default function FleetModule() {
         {selectedRecord ? (
           <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord}
             mode={selectedRecord.mode || 'view'}
-            onRecordCreated={(r) => setSelectedRecord({ table: r.table, id: r.id })} />
+            onRecordCreated={(r) => setSelectedRecord({ table: r.table, id: r.id })}
+            prefill={selectedRecord.prefill}
+            onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
         {sec==='home'       && <FleetHome setSec={setSec} vehicles={vehicles} activities={activities} kits={kits} />}
         {sec==='vehicles'   && <LiveListView loading={loading} error={error} data={vehicles}   columns={VEH_COLS} systemViews={VEH_VIEWS} defaultViewId="VV-01" newLabel="Vehicle"  onNew={() => setSelectedRecord({ table: 'vehicles', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}

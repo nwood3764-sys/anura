@@ -315,7 +315,9 @@ export default function AdminModule() {
         {selectedRecord ? (
           <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord}
             mode={selectedRecord.mode || 'view'}
-            onRecordCreated={(r) => setSelectedRecord({ table: r.table, id: r.id })} />
+            onRecordCreated={(r) => setSelectedRecord({ table: r.table, id: r.id })}
+            prefill={selectedRecord.prefill}
+            onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
         {sec==='home'        && <AdminHome setSec={setSec} roles={roles} programs={programs} workTypes={workTypes} emails={emails} documents={documents} automations={automations} validations={validations} picklists={picklists} />}
         {sec==='programs'    && <LiveListView loading={loading} error={error} data={programs}    columns={PROG_COLS} systemViews={PROG_VIEWS}     defaultViewId="PV-01"  newLabel="Program"       onNew={() => setSelectedRecord({ table: 'programs', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}

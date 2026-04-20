@@ -301,7 +301,9 @@ export default function IncentivesModule() {
         {selectedRecord ? (
           <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord}
             mode={selectedRecord.mode || 'view'}
-            onRecordCreated={(r) => setSelectedRecord({ table: r.table, id: r.id })} />
+            onRecordCreated={(r) => setSelectedRecord({ table: r.table, id: r.id })}
+            prefill={selectedRecord.prefill}
+            onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
         {sec==='home'     && <IncentivesHome setSec={setSec} requests={requests} receipts={receipts} />}
         {sec==='requests' && <LiveListView loading={loading} error={error} data={requests} columns={PR_COLS}  systemViews={PR_VIEWS}  defaultViewId="PRV-01" newLabel="Project Payment Request" onNew={()=>{}} renderCell={prCell}  onOpenRecord={openRecord}/>}

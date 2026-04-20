@@ -282,7 +282,9 @@ export default function StockModule() {
         {selectedRecord ? (
           <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord}
             mode={selectedRecord.mode || 'view'}
-            onRecordCreated={(r) => setSelectedRecord({ table: r.table, id: r.id })} />
+            onRecordCreated={(r) => setSelectedRecord({ table: r.table, id: r.id })}
+            prefill={selectedRecord.prefill}
+            onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
         {sec==='home'      && <StockHome setSec={setSec} products={products} inventory={inventory} requests={requests} equipment={equipment} />}
         {sec==='inventory' && <LiveListView loading={loading} error={error} data={inventory} columns={INV_COLS}  systemViews={INV_VIEWS}  defaultViewId="IV-01"  newLabel="Inventory Record" onNew={() => setSelectedRecord({ table: 'product_items', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
