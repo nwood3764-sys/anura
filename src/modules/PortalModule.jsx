@@ -232,11 +232,13 @@ export default function PortalModule() {
       <SectionTabs sections={SECTIONS} active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} />
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
         {selectedRecord ? (
-          <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord} />
+          <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord}
+            mode={selectedRecord.mode || 'view'}
+            onRecordCreated={(r) => setSelectedRecord({ table: r.table, id: r.id })} />
         ) : (<>
         {sec==='home'     && <PortalHome setSec={setSec} users={users} partners={partners} />}
-        {sec==='users'    && <LiveListView loading={loading} error={error} data={users}    columns={USER_COLS}    systemViews={USER_VIEWS}    defaultViewId="PUV-01" newLabel="Portal User"           onNew={() => {}}  onOpenRecord={openRecord}/>}
-        {sec==='partners' && <LiveListView loading={loading} error={error} data={partners} columns={PARTNER_COLS} systemViews={PARTNER_VIEWS} defaultViewId="POV-01" newLabel="Partner Organization"  onNew={() => {}}  onOpenRecord={openRecord}/>}
+        {sec==='users'    && <LiveListView loading={loading} error={error} data={users}    columns={USER_COLS}    systemViews={USER_VIEWS}    defaultViewId="PUV-01" newLabel="Portal User"           onNew={() => setSelectedRecord({ table: 'portal_users', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='partners' && <LiveListView loading={loading} error={error} data={partners} columns={PARTNER_COLS} systemViews={PARTNER_VIEWS} defaultViewId="POV-01" newLabel="Partner Organization"  onNew={() => setSelectedRecord({ table: 'partner_organizations', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
         </>)}
       </div>
     </div>

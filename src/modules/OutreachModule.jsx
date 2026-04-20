@@ -423,15 +423,17 @@ export default function OutreachModule() {
 
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
         {selectedRecord ? (
-          <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord} />
+          <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord}
+            mode={selectedRecord.mode || 'view'}
+            onRecordCreated={(r) => setSelectedRecord({ table: r.table, id: r.id })} />
         ) : (<>
         {sec === 'home'       && <OutreachHome setSec={setSec} properties={properties} opportunities={opportunities} enrollments={enrollments} contacts={contacts} />}
-        {sec === 'opps'       && <LiveListView loading={loading} error={error} data={opportunities} columns={OPP_COLS}    systemViews={OPP_VIEWS}  defaultViewId="OV-01" newLabel="Opportunity" onNew={() => {}} onOpenRecord={openRecord} />}
-        {sec === 'properties' && <LiveListView loading={loading} error={error} data={properties}   columns={PROP_COLS}   systemViews={PROP_VIEWS} defaultViewId="PV-01" newLabel="Property"    onNew={() => {}} onOpenRecord={openRecord} />}
-        {sec === 'buildings'  && <LiveListView loading={loading} error={error} data={buildings}    columns={BLDG_COLS}   systemViews={BLDG_VIEWS} defaultViewId="BV-01" newLabel="Building"    onNew={() => {}} onOpenRecord={openRecord} />}
-        {sec === 'units'      && <LiveListView loading={loading} error={error} data={units}        columns={UNIT_COLS}   systemViews={UNIT_VIEWS} defaultViewId="UV-01" newLabel="Unit"        onNew={() => {}} onOpenRecord={openRecord} />}
-        {sec === 'contacts'   && <LiveListView loading={loading} error={error} data={contacts}     columns={CONTACT_COLS} systemViews={CONT_VIEWS} defaultViewId="CV-01" newLabel="Contact"    onNew={() => {}} onOpenRecord={openRecord} renderCell={contactCell} />}
-        {sec === 'enrollment' && <LiveListView loading={loading} error={error} data={enrollments}  columns={ENR_COLS}    systemViews={ENR_VIEWS}  defaultViewId="EV-01" newLabel="Enrollment"  onNew={() => {}} onOpenRecord={openRecord} renderCell={enrollmentCell} />}
+        {sec === 'opps'       && <LiveListView loading={loading} error={error} data={opportunities} columns={OPP_COLS}    systemViews={OPP_VIEWS}  defaultViewId="OV-01" newLabel="Opportunity" onNew={() => setSelectedRecord({ table: 'opportunities', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
+        {sec === 'properties' && <LiveListView loading={loading} error={error} data={properties}   columns={PROP_COLS}   systemViews={PROP_VIEWS} defaultViewId="PV-01" newLabel="Property"    onNew={() => setSelectedRecord({ table: 'properties', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
+        {sec === 'buildings'  && <LiveListView loading={loading} error={error} data={buildings}    columns={BLDG_COLS}   systemViews={BLDG_VIEWS} defaultViewId="BV-01" newLabel="Building"    onNew={() => setSelectedRecord({ table: 'buildings', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
+        {sec === 'units'      && <LiveListView loading={loading} error={error} data={units}        columns={UNIT_COLS}   systemViews={UNIT_VIEWS} defaultViewId="UV-01" newLabel="Unit"        onNew={() => setSelectedRecord({ table: 'units', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
+        {sec === 'contacts'   && <LiveListView loading={loading} error={error} data={contacts}     columns={CONTACT_COLS} systemViews={CONT_VIEWS} defaultViewId="CV-01" newLabel="Contact"    onNew={() => setSelectedRecord({ table: 'contacts', id: null, mode: 'create' })} onOpenRecord={openRecord} renderCell={contactCell} />}
+        {sec === 'enrollment' && <LiveListView loading={loading} error={error} data={enrollments}  columns={ENR_COLS}    systemViews={ENR_VIEWS}  defaultViewId="EV-01" newLabel="Enrollment"  onNew={() => setSelectedRecord({ table: 'property_programs', id: null, mode: 'create' })} onOpenRecord={openRecord} renderCell={enrollmentCell} />}
         </>)}
       </div>
     </div>

@@ -411,11 +411,13 @@ export default function FieldModule() {
       <SectionTabs sections={SECTIONS} active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} urgentSections={urgentSections} />
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
         {selectedRecord ? (
-          <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord} />
+          <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord}
+            mode={selectedRecord.mode || 'view'}
+            onRecordCreated={(r) => setSelectedRecord({ table: r.table, id: r.id })} />
         ) : (<>
         {sec==='home'       && <FieldHome setSec={setSec} projects={projects} workOrders={workOrders} paymentRequests={paymentRequests} />}
-        {sec==='projects'   && <LiveListView loading={loading} error={error} data={projects}   columns={PROJ_COLS} systemViews={PROJ_VIEWS} defaultViewId="PJV-01" newLabel="Project"    onNew={() => {}} onOpenRecord={openRecord} renderDetail={renderProjectDetail} />}
-        {sec==='workorders' && <LiveListView loading={loading} error={error} data={workOrders} columns={WO_COLS}   systemViews={WO_VIEWS}   defaultViewId="WOV-01" newLabel="Work Order" onNew={() => {}} onOpenRecord={openRecord} />}
+        {sec==='projects'   && <LiveListView loading={loading} error={error} data={projects}   columns={PROJ_COLS} systemViews={PROJ_VIEWS} defaultViewId="PJV-01" newLabel="Project"    onNew={() => setSelectedRecord({ table: 'projects', id: null, mode: 'create' })} onOpenRecord={openRecord} renderDetail={renderProjectDetail} />}
+        {sec==='workorders' && <LiveListView loading={loading} error={error} data={workOrders} columns={WO_COLS}   systemViews={WO_VIEWS}   defaultViewId="WOV-01" newLabel="Work Order" onNew={() => setSelectedRecord({ table: 'work_orders', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
         {sec==='schedule'   && <ScheduleView />}
         </>)}
       </div>

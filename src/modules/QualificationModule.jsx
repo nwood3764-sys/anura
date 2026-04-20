@@ -255,12 +255,14 @@ export default function QualificationModule() {
       <SectionTabs sections={SECTIONS} active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} urgentSections={urgentSections} />
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
         {selectedRecord ? (
-          <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord} />
+          <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord}
+            mode={selectedRecord.mode || 'view'}
+            onRecordCreated={(r) => setSelectedRecord({ table: r.table, id: r.id })} />
         ) : (<>
         {sec==='home'         && <QualHome setSec={setSec} assessments={assessments} applications={applications} efrReports={efrReports} />}
-        {sec==='assessments'  && <LiveListView loading={loading} error={error} data={assessments} columns={ASMT_COLS} systemViews={ASMT_VIEWS} defaultViewId="AV-01" newLabel="Assessment"  onNew={() => {}}  onOpenRecord={openRecord}/>}
-        {sec==='applications' && <LiveListView loading={loading} error={error} data={applications} columns={IA_COLS}   systemViews={IA_VIEWS}   defaultViewId="IV-01" newLabel="Application" onNew={() => {}}  onOpenRecord={openRecord}/>}
-        {sec==='efr'          && <LiveListView loading={loading} error={error} data={efrReports}  columns={EFR_COLS}  systemViews={EFR_VIEWS}  defaultViewId="EV-01" newLabel="EFR Report"  onNew={() => {}}  onOpenRecord={openRecord}/>}
+        {sec==='assessments'  && <LiveListView loading={loading} error={error} data={assessments} columns={ASMT_COLS} systemViews={ASMT_VIEWS} defaultViewId="AV-01" newLabel="Assessment"  onNew={() => setSelectedRecord({ table: 'assessments', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='applications' && <LiveListView loading={loading} error={error} data={applications} columns={IA_COLS}   systemViews={IA_VIEWS}   defaultViewId="IV-01" newLabel="Application" onNew={() => setSelectedRecord({ table: 'incentive_applications', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='efr'          && <LiveListView loading={loading} error={error} data={efrReports}  columns={EFR_COLS}  systemViews={EFR_VIEWS}  defaultViewId="EV-01" newLabel="EFR Report"  onNew={() => setSelectedRecord({ table: 'efr_reports', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
         </>)}
       </div>
     </div>

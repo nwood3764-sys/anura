@@ -1,5 +1,19 @@
 import { supabase } from '../lib/supabase'
 import { loadPicklists } from './outreachService'
+export { loadPicklists }
+
+/**
+ * Get the current authenticated user's app-level UUID from the users table.
+ */
+let _cachedUserId = null
+export async function getCurrentUserId() {
+  if (_cachedUserId) return _cachedUserId
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Not authenticated')
+  const { data } = await supabase.from('users').select('id').eq('auth_user_id', user.id).single()
+  _cachedUserId = data?.id || user.id
+  return _cachedUserId
+}
 
 /**
  * Fetch the page layout configuration for a given object.
@@ -220,5 +234,36 @@ export async function fetchPicklistOptions(objectName, fieldName) {
     id: r.id,
     value: r.id,        // the UUID stored in the record
     label: r.picklist_label || r.picklist_value,
+  }))
+}
+
+/**
+ * Insert a new record. Returns the newly created record.
+ */
+export async function insertRecord(tableName, fields) {
+  const { data, error } = await supabase
+    .from(tableName)
+    .insert(fields)
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+/**
+ * Fetch lookup options for a FK field — id + display name from the
+ * referenced table. Used for <select> dropdowns on lookup fields.
+ */
+export async function fetchLookupOptions(lookupTable, lookupField, limit = 50) {
+  const { data, error } = await supabase
+    .from(lookupTable)
+    .select(`id, ${lookupField}`)
+    .limit(limit)
+
+  if (error) throw error
+  return (data || []).map(r => ({
+    value: r.id,
+    label: r[lookupField] || r.id.slice(0, 8),
   }))
 }

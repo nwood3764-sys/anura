@@ -254,12 +254,14 @@ export default function FleetModule() {
       <SectionTabs sections={SECTIONS} active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} urgentSections={urgentSections} />
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
         {selectedRecord ? (
-          <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord} />
+          <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord}
+            mode={selectedRecord.mode || 'view'}
+            onRecordCreated={(r) => setSelectedRecord({ table: r.table, id: r.id })} />
         ) : (<>
         {sec==='home'       && <FleetHome setSec={setSec} vehicles={vehicles} activities={activities} kits={kits} />}
-        {sec==='vehicles'   && <LiveListView loading={loading} error={error} data={vehicles}   columns={VEH_COLS} systemViews={VEH_VIEWS} defaultViewId="VV-01" newLabel="Vehicle"  onNew={() => {}}  onOpenRecord={openRecord}/>}
-        {sec==='activities' && <LiveListView loading={loading} error={error} data={activities} columns={ACT_COLS} systemViews={ACT_VIEWS} defaultViewId="AV-01" newLabel="Activity" onNew={() => {}}  onOpenRecord={openRecord}/>}
-        {sec==='kits'       && <LiveListView loading={loading} error={error} data={kits}       columns={KIT_COLS} systemViews={KIT_VIEWS} defaultViewId="KV-01" newLabel="Kit"      onNew={() => {}}  onOpenRecord={openRecord}/>}
+        {sec==='vehicles'   && <LiveListView loading={loading} error={error} data={vehicles}   columns={VEH_COLS} systemViews={VEH_VIEWS} defaultViewId="VV-01" newLabel="Vehicle"  onNew={() => setSelectedRecord({ table: 'vehicles', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='activities' && <LiveListView loading={loading} error={error} data={activities} columns={ACT_COLS} systemViews={ACT_VIEWS} defaultViewId="AV-01" newLabel="Activity" onNew={() => setSelectedRecord({ table: 'vehicle_activities', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='kits'       && <LiveListView loading={loading} error={error} data={kits}       columns={KIT_COLS} systemViews={KIT_VIEWS} defaultViewId="KV-01" newLabel="Kit"      onNew={() => setSelectedRecord({ table: 'equipment_containers', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
         </>)}
       </div>
     </div>

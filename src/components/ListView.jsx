@@ -419,7 +419,7 @@ export function ListView({ data, columns, systemViews, defaultViewId, newLabel, 
                     <span onClick={clearAll} style={{ color: '#1a5a8a', cursor: 'pointer', textDecoration: 'underline' }}>Clear filters</span>
                   </td></tr>
                 ) : filtered.map(r => (
-                  <TableRow key={r.id} onClick={() => setSelectedRow(selectedRow?.id === r.id ? null : r)} selected={selectedRow?.id === r.id}>
+                  <TableRow key={r.id} onClick={() => setSelectedRow(selectedRow?.id === r.id ? null : r)} onDoubleClick={() => onOpenRecord && onOpenRecord(r)} selected={selectedRow?.id === r.id}>
                     {columns.map(col => {
                       if (renderCell) {
                         const custom = renderCell(col, r);

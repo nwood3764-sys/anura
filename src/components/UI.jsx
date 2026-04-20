@@ -24,11 +24,12 @@ export function Icon({ path, size = 15, color = 'currentColor', weight = 1.8 }) 
   );
 }
 
-export function TableRow({ children, onClick, selected }) {
+export function TableRow({ children, onClick, onDoubleClick, selected }) {
   const [hovered, setHovered] = useState(false);
   return (
     <tr
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{

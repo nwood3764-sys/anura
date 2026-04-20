@@ -313,17 +313,19 @@ export default function AdminModule() {
       <SectionTabs sections={SECTIONS} active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} />
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
         {selectedRecord ? (
-          <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord} />
+          <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord}
+            mode={selectedRecord.mode || 'view'}
+            onRecordCreated={(r) => setSelectedRecord({ table: r.table, id: r.id })} />
         ) : (<>
         {sec==='home'        && <AdminHome setSec={setSec} roles={roles} programs={programs} workTypes={workTypes} emails={emails} documents={documents} automations={automations} validations={validations} picklists={picklists} />}
-        {sec==='programs'    && <LiveListView loading={loading} error={error} data={programs}    columns={PROG_COLS} systemViews={PROG_VIEWS}     defaultViewId="PV-01"  newLabel="Program"       onNew={() => {}}  onOpenRecord={openRecord}/>}
-        {sec==='worktypes'   && <LiveListView loading={loading} error={error} data={workTypes}   columns={WT_COLS}   systemViews={ALL_V([])}      defaultViewId="AV"     newLabel="Work Type"     onNew={() => {}}  onOpenRecord={openRecord}/>}
-        {sec==='emails'      && <LiveListView loading={loading} error={error} data={emails}      columns={ET_COLS}   systemViews={ET_VIEWS}       defaultViewId="ETV-01" newLabel="Email Template" onNew={() => {}}  onOpenRecord={openRecord}/>}
-        {sec==='documents'   && <LiveListView loading={loading} error={error} data={documents}   columns={DT_COLS}   systemViews={ALL_V([])}      defaultViewId="AV"     newLabel="Document Template" onNew={() => {}}  onOpenRecord={openRecord}/>}
-        {sec==='automations' && <LiveListView loading={loading} error={error} data={automations} columns={AR_COLS}   systemViews={AR_VIEWS}       defaultViewId="ARV-01" newLabel="Automation Rule" onNew={() => {}}  onOpenRecord={openRecord}/>}
-        {sec==='validations' && <LiveListView loading={loading} error={error} data={validations} columns={VR_COLS}   systemViews={ALL_V([])}      defaultViewId="AV"     newLabel="Validation Rule" onNew={() => {}}  onOpenRecord={openRecord}/>}
-        {sec==='roles'       && <LiveListView loading={loading} error={error} data={roles}       columns={ROLE_COLS} systemViews={ALL_V([])}      defaultViewId="AV"     newLabel="Role"          onNew={() => {}}  onOpenRecord={openRecord}/>}
-        {sec==='picklists'   && <LiveListView loading={loading} error={error} data={picklists}   columns={PL_COLS}   systemViews={ALL_V([])}      defaultViewId="AV"     newLabel="Picklist Value" onNew={() => {}}  onOpenRecord={openRecord}/>}
+        {sec==='programs'    && <LiveListView loading={loading} error={error} data={programs}    columns={PROG_COLS} systemViews={PROG_VIEWS}     defaultViewId="PV-01"  newLabel="Program"       onNew={() => setSelectedRecord({ table: 'programs', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='worktypes'   && <LiveListView loading={loading} error={error} data={workTypes}   columns={WT_COLS}   systemViews={ALL_V([])}      defaultViewId="AV"     newLabel="Work Type"     onNew={() => setSelectedRecord({ table: 'work_types', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='emails'      && <LiveListView loading={loading} error={error} data={emails}      columns={ET_COLS}   systemViews={ET_VIEWS}       defaultViewId="ETV-01" newLabel="Email Template" onNew={() => setSelectedRecord({ table: 'email_templates', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='documents'   && <LiveListView loading={loading} error={error} data={documents}   columns={DT_COLS}   systemViews={ALL_V([])}      defaultViewId="AV"     newLabel="Document Template" onNew={() => setSelectedRecord({ table: 'document_templates', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='automations' && <LiveListView loading={loading} error={error} data={automations} columns={AR_COLS}   systemViews={AR_VIEWS}       defaultViewId="ARV-01" newLabel="Automation Rule" onNew={() => setSelectedRecord({ table: 'automation_rules', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='validations' && <LiveListView loading={loading} error={error} data={validations} columns={VR_COLS}   systemViews={ALL_V([])}      defaultViewId="AV"     newLabel="Validation Rule" onNew={() => setSelectedRecord({ table: 'validation_rules', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='roles'       && <LiveListView loading={loading} error={error} data={roles}       columns={ROLE_COLS} systemViews={ALL_V([])}      defaultViewId="AV"     newLabel="Role"          onNew={() => setSelectedRecord({ table: 'roles', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='picklists'   && <LiveListView loading={loading} error={error} data={picklists}   columns={PL_COLS}   systemViews={ALL_V([])}      defaultViewId="AV"     newLabel="Picklist Value" onNew={() => setSelectedRecord({ table: 'picklist_values', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
         </>)}
       </div>
     </div>

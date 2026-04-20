@@ -299,7 +299,9 @@ export default function IncentivesModule() {
       <SectionTabs sections={SECTIONS} active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} urgentSections={urgentSections} />
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
         {selectedRecord ? (
-          <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord} />
+          <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord}
+            mode={selectedRecord.mode || 'view'}
+            onRecordCreated={(r) => setSelectedRecord({ table: r.table, id: r.id })} />
         ) : (<>
         {sec==='home'     && <IncentivesHome setSec={setSec} requests={requests} receipts={receipts} />}
         {sec==='requests' && <LiveListView loading={loading} error={error} data={requests} columns={PR_COLS}  systemViews={PR_VIEWS}  defaultViewId="PRV-01" newLabel="Project Payment Request" onNew={()=>{}} renderCell={prCell}  onOpenRecord={openRecord}/>}

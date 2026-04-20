@@ -280,13 +280,15 @@ export default function StockModule() {
       <SectionTabs sections={SECTIONS} active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} urgentSections={urgentSections} />
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
         {selectedRecord ? (
-          <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord} />
+          <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord}
+            mode={selectedRecord.mode || 'view'}
+            onRecordCreated={(r) => setSelectedRecord({ table: r.table, id: r.id })} />
         ) : (<>
         {sec==='home'      && <StockHome setSec={setSec} products={products} inventory={inventory} requests={requests} equipment={equipment} />}
-        {sec==='inventory' && <LiveListView loading={loading} error={error} data={inventory} columns={INV_COLS}  systemViews={INV_VIEWS}  defaultViewId="IV-01"  newLabel="Inventory Record" onNew={() => {}}  onOpenRecord={openRecord}/>}
-        {sec==='products'  && <LiveListView loading={loading} error={error} data={products}  columns={PROD_COLS} systemViews={PROD_VIEWS} defaultViewId="PRV-01" newLabel="Product"          onNew={() => {}}  onOpenRecord={openRecord}/>}
-        {sec==='requests'  && <LiveListView loading={loading} error={error} data={requests}  columns={REQ_COLS}  systemViews={REQ_VIEWS}  defaultViewId="RV-01"  newLabel="Materials Request" onNew={() => {}}  onOpenRecord={openRecord}/>}
-        {sec==='equipment' && <LiveListView loading={loading} error={error} data={equipment} columns={EQ_COLS}   systemViews={EQ_VIEWS}   defaultViewId="EQV-01" newLabel="Equipment"        onNew={() => {}}  onOpenRecord={openRecord}/>}
+        {sec==='inventory' && <LiveListView loading={loading} error={error} data={inventory} columns={INV_COLS}  systemViews={INV_VIEWS}  defaultViewId="IV-01"  newLabel="Inventory Record" onNew={() => setSelectedRecord({ table: 'product_items', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='products'  && <LiveListView loading={loading} error={error} data={products}  columns={PROD_COLS} systemViews={PROD_VIEWS} defaultViewId="PRV-01" newLabel="Product"          onNew={() => setSelectedRecord({ table: 'products', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='requests'  && <LiveListView loading={loading} error={error} data={requests}  columns={REQ_COLS}  systemViews={REQ_VIEWS}  defaultViewId="RV-01"  newLabel="Materials Request" onNew={() => setSelectedRecord({ table: 'materials_requests', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='equipment' && <LiveListView loading={loading} error={error} data={equipment} columns={EQ_COLS}   systemViews={EQ_VIEWS}   defaultViewId="EQV-01" newLabel="Equipment"        onNew={() => setSelectedRecord({ table: 'equipment', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
         </>)}
       </div>
     </div>

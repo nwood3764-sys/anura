@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { C } from '../data/constants'
 import { Badge, Icon } from './UI'
-import { loadRecordDetailData, saveRecord, fetchPicklistOptions } from '../data/layoutService'
+import { loadRecordDetailData, saveRecord, insertRecord, fetchPicklistOptions, fetchLookupOptions, fetchPageLayout, loadPicklists as loadAllPicklists, getCurrentUserId } from '../data/layoutService'
 
 // ---------------------------------------------------------------------------
 // Field value formatter
@@ -109,7 +109,7 @@ function Breadcrumbs({ tableName, record, lookups, onBack }) {
 // EditField — renders the right input for a field type
 // ---------------------------------------------------------------------------
 
-function EditField({ field, value, onChange, picklistOpts }) {
+function EditField({ field, value, onChange, picklistOpts, lookupOpts }) {
   const v = value ?? ''
 
   switch (field.type) {
@@ -149,7 +149,21 @@ function EditField({ field, value, onChange, picklistOpts }) {
       )
     }
 
-    case 'lookup': case 'datetime':
+    case 'lookup': {
+      const opts = lookupOpts || []
+      if (opts.length > 0) {
+        return (
+          <select style={{ ...inputBase, cursor: 'pointer' }}
+            value={v || ''} onChange={e => onChange(field.name, e.target.value || null)}>
+            <option value="">— Select —</option>
+            {opts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        )
+      }
+      return <span style={{ fontSize: 13, color: C.textMuted, fontStyle: 'italic' }}>Read-only</span>
+    }
+
+    case 'datetime':
       return <span style={{ fontSize: 13, color: C.textMuted, fontStyle: 'italic' }}>Read-only</span>
 
     default:
@@ -161,7 +175,7 @@ function EditField({ field, value, onChange, picklistOpts }) {
 // FieldGroup widget — view mode OR edit mode
 // ---------------------------------------------------------------------------
 
-function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, onChange, allPicklistOpts }) {
+function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts }) {
   const fields = widget.widget_config?.fields || []
   if (fields.length === 0) return null
 
@@ -171,7 +185,8 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
         const raw = editing ? draft[f.name] : record[f.name]
         const display = formatFieldValue(raw, f, picklists, lookups)
         const isLink = f.type === 'email' || f.type === 'lookup'
-        const isEditable = editing && f.type !== 'lookup' && f.type !== 'datetime'
+        const hasLookupOpts = f.type === 'lookup' && allLookupOpts?.[f.name]?.length > 0
+        const isEditable = editing && (f.type !== 'datetime') && (f.type !== 'lookup' || hasLookupOpts)
 
         return (
           <div key={f.name} style={{
@@ -183,7 +198,8 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
               {f.label}
             </span>
             {isEditable ? (
-              <EditField field={f} value={draft[f.name]} onChange={onChange} picklistOpts={allPicklistOpts?.[f.name]} />
+              <EditField field={f} value={draft[f.name]} onChange={onChange}
+                picklistOpts={allPicklistOpts?.[f.name]} lookupOpts={allLookupOpts?.[f.name]} />
             ) : (
               <span style={{
                 fontSize: 13,
@@ -252,7 +268,7 @@ function RelatedListWidget({ widget, picklists }) {
 // Section
 // ---------------------------------------------------------------------------
 
-function Section({ section, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, tableName }) {
+function Section({ section, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, tableName }) {
   const [collapsed, setCollapsed] = useState(section.section_is_collapsed_by_default || false)
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, marginBottom: 12, overflow: 'hidden' }}>
@@ -264,7 +280,7 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
       {!collapsed && section.widgets.map(w => {
         if (w.widget_type === 'field_group')
           return <FieldGroupWidget key={w.id} widget={w} record={record} picklists={picklists} lookups={lookups}
-            editing={editing} draft={draft} onChange={onChange} allPicklistOpts={allPicklistOpts} />
+            editing={editing} draft={draft} onChange={onChange} allPicklistOpts={allPicklistOpts} allLookupOpts={allLookupOpts} />
         if (w.widget_type === 'related_list')
           return <div key={w.id} style={{ padding: '12px 18px' }}><RelatedListWidget widget={w} picklists={picklists} /></div>
         return null
@@ -277,53 +293,157 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
 // RecordDetail — main component
 // ---------------------------------------------------------------------------
 
-export default function RecordDetail({ tableName, recordId, onBack }) {
+export default function RecordDetail({ tableName, recordId, onBack, mode = 'view', onRecordCreated }) {
+  const isCreate = mode === 'create'
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [editing, setEditing] = useState(false)
+  const [editing, setEditing] = useState(isCreate)
   const [draft, setDraft] = useState({})
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState(null)
   const [allPicklistOpts, setAllPicklistOpts] = useState({})
+  const [allLookupOpts, setAllLookupOpts] = useState({})
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true); setError(null); setEditing(false)
-    loadRecordDetailData(tableName, recordId)
-      .then(d => { if (!cancelled) setData(d) })
-      .catch(err => { if (!cancelled) setError(err) })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
-  }, [tableName, recordId])
+    setLoading(true); setError(null)
 
-  const loadPicklistOpts = useCallback(async (sections) => {
-    const fields = []
+    if (isCreate) {
+      // Create mode: fetch layout + picklists only, no record
+      Promise.all([fetchPageLayout(tableName), loadAllPicklists()])
+        .then(([layoutData, picklists]) => {
+          if (cancelled) return
+          setData({
+            record: {},
+            layout: layoutData?.layout || null,
+            sections: layoutData?.sections || [],
+            picklists,
+            lookups: new Map(),
+          })
+          setDraft({})
+          setEditing(true)
+          // Pre-load picklist + lookup options
+          if (layoutData?.sections) {
+            loadAllEditOpts(layoutData.sections)
+          }
+        })
+        .catch(err => { if (!cancelled) setError(err) })
+        .finally(() => { if (!cancelled) setLoading(false) })
+    } else {
+      // View mode: fetch everything
+      setEditing(false)
+      loadRecordDetailData(tableName, recordId)
+        .then(d => { if (!cancelled) setData(d) })
+        .catch(err => { if (!cancelled) setError(err) })
+        .finally(() => { if (!cancelled) setLoading(false) })
+    }
+    return () => { cancelled = true }
+  }, [tableName, recordId, isCreate])
+
+  const loadAllEditOpts = useCallback(async (sections) => {
+    const pickFields = []
+    const lookupFields = []
     for (const s of sections) for (const w of s.widgets)
       if (w.widget_type === 'field_group' && w.widget_config?.fields)
-        for (const f of w.widget_config.fields) if (f.type === 'picklist') fields.push(f.name)
-    if (!fields.length) return
-    const opts = {}
-    await Promise.all(fields.map(async fn => {
-      try { opts[fn] = await fetchPicklistOptions(tableName, fn) } catch { opts[fn] = [] }
-    }))
-    setAllPicklistOpts(opts)
+        for (const f of w.widget_config.fields) {
+          if (f.type === 'picklist') pickFields.push(f.name)
+          if (f.type === 'lookup' && f.lookup_table && f.lookup_field)
+            lookupFields.push({ name: f.name, table: f.lookup_table, field: f.lookup_field })
+        }
+
+    // Fetch picklist options
+    if (pickFields.length) {
+      const opts = {}
+      await Promise.all(pickFields.map(async fn => {
+        try { opts[fn] = await fetchPicklistOptions(tableName, fn) } catch { opts[fn] = [] }
+      }))
+      setAllPicklistOpts(opts)
+    }
+
+    // Fetch lookup options
+    if (lookupFields.length) {
+      const opts = {}
+      await Promise.all(lookupFields.map(async lf => {
+        try { opts[lf.name] = await fetchLookupOptions(lf.table, lf.field) } catch { opts[lf.name] = [] }
+      }))
+      setAllLookupOpts(opts)
+    }
   }, [tableName])
 
   const startEditing = () => {
     if (!data?.record) return
     setDraft({ ...data.record }); setSaveError(null); setEditing(true)
-    if (data.sections) loadPicklistOpts(data.sections)
+    if (data.sections) loadAllEditOpts(data.sections)
   }
-  const cancelEditing = () => { setEditing(false); setDraft({}); setSaveError(null) }
+  const cancelEditing = () => {
+    if (isCreate) { onBack(); return }
+    setEditing(false); setDraft({}); setSaveError(null)
+  }
   const handleFieldChange = (name, value) => setDraft(prev => ({ ...prev, [name]: value }))
 
   const handleSave = async () => {
     setSaving(true); setSaveError(null)
+
+    if (isCreate) {
+      // CREATE mode: build the insert payload with system fields
+      try {
+        const userId = await getCurrentUserId()
+        const fields = { ...draft }
+
+        // Auto-fill system fields based on table naming conventions
+        const prefixes = ['contact','property','opportunity','work_order','project','building','unit',
+                          'assessment','vehicle','technician','product','equipment']
+        for (const p of prefixes) {
+          if (tableName.startsWith(p) || tableName === p + 's' || tableName === p + 'ies') {
+            if (!fields[`${p}_record_number`]) fields[`${p}_record_number`] = 'NEW'
+            if (!fields[`${p}_owner`]) fields[`${p}_owner`] = userId
+            if (!fields[`${p}_created_by`]) fields[`${p}_created_by`] = userId
+            // Auto-derive name for contacts
+            if (p === 'contact' && !fields.contact_name && fields.contact_first_name) {
+              fields.contact_name = `${fields.contact_first_name} ${fields.contact_last_name || ''}`.trim()
+            }
+            break
+          }
+        }
+        // Special cases for tables with different column naming
+        if (tableName === 'incentive_applications') {
+          if (!fields.ia_record_number) fields.ia_record_number = 'NEW'
+          if (!fields.ia_owner) fields.ia_owner = userId
+          if (!fields.ia_created_by) fields.ia_created_by = userId
+        }
+        if (tableName === 'project_payment_requests') {
+          if (!fields.ppr_record_number) fields.ppr_record_number = 'NEW'
+          if (!fields.ppr_owner) fields.ppr_owner = userId
+          if (!fields.ppr_created_by) fields.ppr_created_by = userId
+        }
+        if (tableName === 'partner_organizations') {
+          if (!fields.owner_id) fields.owner_id = userId
+          if (!fields.created_by) fields.created_by = userId
+          if (!fields.record_type) fields.record_type = 'Partner Organization'
+        }
+
+        // Strip empty string values (convert to null)
+        for (const [k, v] of Object.entries(fields)) {
+          if (v === '') fields[k] = null
+        }
+
+        const created = await insertRecord(tableName, fields)
+
+        if (onRecordCreated) {
+          onRecordCreated({ table: tableName, id: created.id })
+        } else {
+          onBack()
+        }
+      } catch (err) { setSaveError(err.message || String(err)) }
+      finally { setSaving(false) }
+      return
+    }
+
+    // UPDATE mode: compute diff and save only changed fields
     const changes = {}
     for (const [k, v] of Object.entries(draft)) if (v !== data.record[k]) changes[k] = v
     for (const sys of ['id','created_at','updated_at']) delete changes[sys]
-    // Also strip any _is_deleted, _created_at, _created_by, _updated_at, _updated_by system columns
     for (const k of Object.keys(changes)) {
       if (k.endsWith('_created_at') || k.endsWith('_created_by') || k.endsWith('_updated_at') || k.endsWith('_updated_by') || k.endsWith('_is_deleted')) delete changes[k]
     }
@@ -347,11 +467,14 @@ export default function RecordDetail({ tableName, recordId, onBack }) {
 
   const { record, layout, sections, picklists, lookups } = data
 
-  const displayName = record.contact_first_name
-    ? `${record.contact_first_name} ${record.contact_last_name || ''}`.trim()
-    : record.property_name || record.opportunity_name || record.work_order_name || record.project_name
-      || record.building_name || record.unit_name || record.vehicle_name || record.technician_name
-      || record.product_name || record.equipment_name || record.name || 'Record'
+  const objectLabel = TABLE_META[tableName]?.label || tableName
+  const displayName = isCreate
+    ? `New ${objectLabel.replace(/s$/, '')}`
+    : (record.contact_first_name
+        ? `${record.contact_first_name} ${record.contact_last_name || ''}`.trim()
+        : record.property_name || record.opportunity_name || record.work_order_name || record.project_name
+          || record.building_name || record.unit_name || record.vehicle_name || record.technician_name
+          || record.product_name || record.equipment_name || record.name || 'Record')
 
   const recordNumber = record.contact_record_number || record.property_record_number
     || record.opportunity_record_number || record.work_order_record_number || record.project_record_number
@@ -432,7 +555,8 @@ export default function RecordDetail({ tableName, recordId, onBack }) {
       {/* Sections */}
       {sections.map(sec => (
         <Section key={sec.id} section={sec} record={record} picklists={picklists} lookups={lookups}
-          editing={editing} draft={draft} onChange={handleFieldChange} allPicklistOpts={allPicklistOpts} tableName={tableName} />
+          editing={editing} draft={draft} onChange={handleFieldChange}
+          allPicklistOpts={allPicklistOpts} allLookupOpts={allLookupOpts} tableName={tableName} />
       ))}
     </div>
   )
