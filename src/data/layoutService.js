@@ -185,3 +185,40 @@ export async function loadRecordDetailData(tableName, recordId) {
     lookups,
   }
 }
+
+/**
+ * Save changes to a record. Only sends the changed fields.
+ * Returns the updated record.
+ */
+export async function saveRecord(tableName, recordId, changes) {
+  const { data, error } = await supabase
+    .from(tableName)
+    .update(changes)
+    .eq('id', recordId)
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+/**
+ * Fetch picklist options for a given object + field.
+ * Used to populate <select> dropdowns in edit mode.
+ */
+export async function fetchPicklistOptions(objectName, fieldName) {
+  const { data, error } = await supabase
+    .from('picklist_values')
+    .select('id, picklist_value, picklist_label')
+    .eq('picklist_object', objectName)
+    .eq('picklist_field', fieldName)
+    .eq('picklist_is_active', true)
+    .order('picklist_sort_order', { ascending: true })
+
+  if (error) throw error
+  return (data || []).map(r => ({
+    id: r.id,
+    value: r.id,        // the UUID stored in the record
+    label: r.picklist_label || r.picklist_value,
+  }))
+}
