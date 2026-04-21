@@ -224,7 +224,7 @@ function ScheduleView({ crews, loading, error, selectedDate, setSelectedDate, on
   )
 }
 
-function FieldHome({ setSec, projects, workOrders, paymentRequests }) {
+function FieldHome({ setSec, projects, workOrders, paymentRequests, scheduleCrews = [] }) {
   const toVerify    = workOrders.filter(w => w.status === 'Work Order To Be Verified')
   const corrections = workOrders.filter(w => w.status === 'Work Order Corrections Needed')
   const toSchedProj = projects.filter(p => p.status === 'Project To Be Scheduled')
@@ -286,8 +286,8 @@ function FieldHome({ setSec, projects, workOrders, paymentRequests }) {
 
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden' }}>
             <div style={{ padding:'12px 14px', borderBottom:`1px solid ${C.border}` }}><div style={{ fontSize:13, fontWeight:600, color:C.textPrimary }}>Crews — Today</div><div style={{ fontSize:11, color:C.textMuted, marginTop:1 }}>April 12, 2026</div></div>
-            {SCHEDULE_CREWS.map((crew,i) => (
-              <div key={crew.id} style={{ padding:'10px 14px', borderBottom:i<SCHEDULE_CREWS.length-1?`1px solid ${C.border}`:'none' }}>
+            {scheduleCrews.map((crew,i) => (
+              <div key={crew.id} style={{ padding:'10px 14px', borderBottom:i<scheduleCrews.length-1?`1px solid ${C.border}`:'none' }}>
                 <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
                   <div style={{ width:22, height:22, borderRadius:'50%', background:crew.color+'22', display:'flex', alignItems:'center', justifyContent:'center', fontSize:9, fontWeight:700, color:crew.color, flexShrink:0 }}>{crew.initials}</div>
                   <span style={{ fontSize:12, fontWeight:600, color:C.textPrimary }}>{crew.name}</span>
@@ -494,7 +494,7 @@ export default function FieldModule() {
             prefill={selectedRecord.prefill}
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
-        {sec==='home'       && <FieldHome setSec={setSec} projects={projects} workOrders={workOrders} paymentRequests={paymentRequests} />}
+        {sec==='home'       && <FieldHome setSec={setSec} projects={projects} workOrders={workOrders} paymentRequests={paymentRequests} scheduleCrews={schedule} />}
         {sec==='projects'   && <LiveListView loading={loading} error={error} data={projects}   columns={PROJ_COLS} systemViews={PROJ_VIEWS} defaultViewId="PJV-01" newLabel="Project"    onNew={() => setSelectedRecord({ table: 'projects', id: null, mode: 'create' })} onOpenRecord={openRecord} renderDetail={renderProjectDetail} />}
         {sec==='workorders' && <LiveListView loading={loading} error={error} data={workOrders} columns={WO_COLS}   systemViews={WO_VIEWS}   defaultViewId="WOV-01" newLabel="Work Order" onNew={() => setSelectedRecord({ table: 'work_orders', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
         {sec==='schedule'   && <ScheduleView
