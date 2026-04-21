@@ -230,6 +230,12 @@ function FieldHome({ setSec, projects, workOrders, paymentRequests, scheduleCrew
   const toSchedProj = projects.filter(p => p.status === 'Project To Be Scheduled')
   const inProgress  = workOrders.filter(w => w.status === 'Work Order In Progress')
 
+  // Live "today" strings for the header subtitle and the Crews card
+  // subtitle. Browser locale. Recomputed every render — cheap, always fresh.
+  const today = new Date()
+  const headerDate = today.toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric', year:'numeric' })
+  const cardDate   = today.toLocaleDateString(undefined, { month:'long',   day:'numeric', year:'numeric' })
+
   const woByStatus = [
     { name:'In Progress',    value: inProgress.length },
     { name:'Scheduled',      value: workOrders.filter(w=>w.status==='Work Order Scheduled').length },
@@ -245,7 +251,7 @@ function FieldHome({ setSec, projects, workOrders, paymentRequests, scheduleCrew
         <div style={{ marginBottom:20 }}>
           <div style={{ fontSize:11, color:C.textMuted, marginBottom:2 }}>Field / Home</div>
           <h1 style={{ fontSize:20, fontWeight:700, color:C.textPrimary, margin:0 }}>Project Coordinator Dashboard</h1>
-          <div style={{ fontSize:12, color:C.textMuted, marginTop:3 }}>Nicholas Wood · Sunday, April 12, 2026</div>
+          <div style={{ fontSize:12, color:C.textMuted, marginTop:3 }}>Nicholas Wood · {headerDate}</div>
         </div>
 
         <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12, marginBottom:16 }}>
@@ -285,7 +291,7 @@ function FieldHome({ setSec, projects, workOrders, paymentRequests, scheduleCrew
           </div>
 
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden' }}>
-            <div style={{ padding:'12px 14px', borderBottom:`1px solid ${C.border}` }}><div style={{ fontSize:13, fontWeight:600, color:C.textPrimary }}>Crews — Today</div><div style={{ fontSize:11, color:C.textMuted, marginTop:1 }}>April 12, 2026</div></div>
+            <div style={{ padding:'12px 14px', borderBottom:`1px solid ${C.border}` }}><div style={{ fontSize:13, fontWeight:600, color:C.textPrimary }}>Crews — Today</div><div style={{ fontSize:11, color:C.textMuted, marginTop:1 }}>{cardDate}</div></div>
             {scheduleCrews.map((crew,i) => (
               <div key={crew.id} style={{ padding:'10px 14px', borderBottom:i<scheduleCrews.length-1?`1px solid ${C.border}`:'none' }}>
                 <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
@@ -407,6 +413,11 @@ export default function FieldModule() {
   const [scheduleLoading, setScheduleLoading] = useState(true)
   const [scheduleError, setScheduleError] = useState(null)
 
+  // The "Crews — Today" card on the Home tab always shows today's crews,
+  // independent of whatever date the user has navigated to in the Schedule
+  // tab. Fetched once on mount alongside projects/work orders/payments.
+  const [todayCrews, setTodayCrews] = useState([])
+
   const SEC_TABLE = { projects: 'projects', workorders: 'work_orders' }
   const openRecord = (row) => { if (row?._id && SEC_TABLE[sec]) setSelectedRecord({ table: SEC_TABLE[sec], id: row._id, name: row.name }) }
   const closeRecord = () => setSelectedRecord(null)
@@ -415,8 +426,8 @@ export default function FieldModule() {
     let cancelled = false
     setLoading(true)
     setError(null)
-    Promise.all([fetchProjects(), fetchWorkOrders(), fetchPaymentRequests()])
-      .then(([p, w, pr]) => { if (!cancelled) { setProjects(p); setWorkOrders(w); setPaymentRequests(pr) } })
+    Promise.all([fetchProjects(), fetchWorkOrders(), fetchPaymentRequests(), fetchSchedule(new Date())])
+      .then(([p, w, pr, tc]) => { if (!cancelled) { setProjects(p); setWorkOrders(w); setPaymentRequests(pr); setTodayCrews(tc) } })
       .catch(err => { if (!cancelled) setError(err) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
@@ -494,7 +505,7 @@ export default function FieldModule() {
             prefill={selectedRecord.prefill}
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
-        {sec==='home'       && <FieldHome setSec={setSec} projects={projects} workOrders={workOrders} paymentRequests={paymentRequests} scheduleCrews={schedule} />}
+        {sec==='home'       && <FieldHome setSec={setSec} projects={projects} workOrders={workOrders} paymentRequests={paymentRequests} scheduleCrews={todayCrews} />}
         {sec==='projects'   && <LiveListView loading={loading} error={error} data={projects}   columns={PROJ_COLS} systemViews={PROJ_VIEWS} defaultViewId="PJV-01" newLabel="Project"    onNew={() => setSelectedRecord({ table: 'projects', id: null, mode: 'create' })} onOpenRecord={openRecord} renderDetail={renderProjectDetail} />}
         {sec==='workorders' && <LiveListView loading={loading} error={error} data={workOrders} columns={WO_COLS}   systemViews={WO_VIEWS}   defaultViewId="WOV-01" newLabel="Work Order" onNew={() => setSelectedRecord({ table: 'work_orders', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
         {sec==='schedule'   && <ScheduleView
