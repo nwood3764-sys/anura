@@ -4,13 +4,8 @@ import { C, CHART_COLORS, fmt } from '../data/constants'
 import { Badge, Icon, TableRow, ProgramTag, SectionTabs } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
-import { fetchProjects, fetchWorkOrders } from '../data/fieldService'
+import { fetchProjects, fetchWorkOrders, fetchSchedule } from '../data/fieldService'
 import { fetchPaymentRequests } from '../data/incentivesService'
-
-// Schedule crews are a UI feature that will be driven by service_appointments
-// + crew assignments in a later pass. For now the schedule view shows an
-// empty state with this constant so nothing breaks.
-const SCHEDULE_CREWS = []
 
 const SECTIONS = [
   { id:'home',       label:'Home'         },
@@ -62,27 +57,60 @@ const DAY_START=6, DAY_END=18, TOTAL=DAY_END-DAY_START
 const pct = h => ((h-DAY_START)/TOTAL)*100
 const fH = h => { const hr=Math.floor(h),mn=Math.round((h-hr)*60),ap=hr<12?'AM':'PM',h12=hr===0?12:hr>12?hr-12:hr; return mn===0?`${h12} ${ap}`:`${h12}:${String(mn).padStart(2,'0')} ${ap}` }
 
-function ScheduleView() {
+// Two dates are "the same calendar day" when their y/m/d match. Used to
+// decide whether to show the NOW marker and to highlight the Today button.
+const isSameDay = (a, b) =>
+  a.getFullYear() === b.getFullYear() &&
+  a.getMonth()    === b.getMonth() &&
+  a.getDate()     === b.getDate()
+
+function ScheduleView({ crews, loading, error, selectedDate, setSelectedDate, onOpenWorkOrder }) {
   const [selJob, setSelJob] = useState(null)
   const hrs = Array.from({ length: TOTAL+1 }, (_, i) => DAY_START+i)
-  const nowH = 10.5
+
+  const today = new Date()
+  const showingToday = isSameDay(selectedDate, today)
+  const nowH = today.getHours() + today.getMinutes() / 60
+  const nowInRange = nowH >= DAY_START && nowH <= DAY_END
+
+  // Closing the detail card when switching days prevents a stale selection
+  // from a different day lingering on the screen.
+  const goToDate = (d) => { setSelJob(null); setSelectedDate(d) }
+  const shiftDay = (days) => {
+    const d = new Date(selectedDate)
+    d.setDate(d.getDate() + days)
+    goToDate(d)
+  }
+
+  const dateLabel = selectedDate.toLocaleDateString(undefined, { weekday:'long', year:'numeric', month:'long', day:'numeric' })
+  const crewCount = crews.length
+  const jobCount  = crews.reduce((n, c) => n + c.jobs.length, 0)
 
   return (
     <div style={{ flex:1, overflow:'auto', padding:'20px 24px' }}>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-          <button style={{ width:30, height:30, background:C.card, border:`1px solid ${C.border}`, borderRadius:6, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}><Icon path="M15 19l-7-7 7-7" size={13} color={C.textSecondary}/></button>
+          <button onClick={() => shiftDay(-1)} style={{ width:30, height:30, background:C.card, border:`1px solid ${C.border}`, borderRadius:6, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}><Icon path="M15 19l-7-7 7-7" size={13} color={C.textSecondary}/></button>
           <div>
-            <div style={{ fontSize:18, fontWeight:700, color:C.textPrimary }}>Sunday, April 12, 2026</div>
-            <div style={{ fontSize:12, color:C.textMuted, marginTop:2 }}>2 active crews · 5 work orders scheduled</div>
+            <div style={{ fontSize:18, fontWeight:700, color:C.textPrimary }}>{dateLabel}</div>
+            <div style={{ fontSize:12, color:C.textMuted, marginTop:2 }}>
+              {loading ? 'Loading schedule…' : `${crewCount} ${crewCount===1?'crew':'crews'} · ${jobCount} ${jobCount===1?'appointment':'appointments'} scheduled`}
+            </div>
           </div>
-          <button style={{ width:30, height:30, background:C.card, border:`1px solid ${C.border}`, borderRadius:6, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}><Icon path="M9 5l7 7-7 7" size={13} color={C.textSecondary}/></button>
-          <button style={{ background:'#e8f8f2', border:`1px solid #b8e8d0`, borderRadius:6, padding:'5px 12px', fontSize:12, fontWeight:600, color:'#1a7a4e', cursor:'pointer' }}>Today</button>
+          <button onClick={() => shiftDay(1)} style={{ width:30, height:30, background:C.card, border:`1px solid ${C.border}`, borderRadius:6, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}><Icon path="M9 5l7 7-7 7" size={13} color={C.textSecondary}/></button>
+          <button onClick={() => goToDate(new Date())} disabled={showingToday}
+            style={{ background: showingToday ? '#e8f8f2' : C.card, border:`1px solid ${showingToday ? '#b8e8d0' : C.border}`, borderRadius:6, padding:'5px 12px', fontSize:12, fontWeight:600, color: showingToday ? '#1a7a4e' : C.textSecondary, cursor: showingToday ? 'default' : 'pointer' }}>Today</button>
         </div>
         <button style={{ background:C.emerald, color:'#fff', border:'none', borderRadius:6, padding:'7px 14px', fontSize:12.5, fontWeight:500, cursor:'pointer', display:'flex', alignItems:'center', gap:5 }}>
           <Icon path="M12 5v14M5 12h14" size={12} color="#fff"/>Schedule Work Order
         </button>
       </div>
+
+      {error && (
+        <div style={{ background:'#fce8e8', border:`1px solid ${C.danger}`, borderRadius:8, padding:'10px 14px', marginBottom:12, color:'#8a1a1a', fontSize:12 }}>
+          Could not load schedule: {String(error.message || error)}
+        </div>
+      )}
 
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, overflow:'hidden' }}>
         {/* Header row with time ticks */}
@@ -96,15 +124,25 @@ function ScheduleView() {
                 <span style={{ fontSize:10, color:C.textMuted, transform:'translateX(-50%)', whiteSpace:'nowrap' }}>{fH(h)}</span>
               </div>
             ))}
-            <div style={{ position:'absolute', left:`${pct(nowH)}%`, top:0, bottom:0, display:'flex', flexDirection:'column', justifyContent:'flex-start', paddingTop:4 }}>
-              <span style={{ fontSize:9, color:C.danger, fontWeight:700, transform:'translateX(-50%)', whiteSpace:'nowrap' }}>NOW</span>
-            </div>
+            {showingToday && nowInRange && (
+              <div style={{ position:'absolute', left:`${pct(nowH)}%`, top:0, bottom:0, display:'flex', flexDirection:'column', justifyContent:'flex-start', paddingTop:4 }}>
+                <span style={{ fontSize:9, color:C.danger, fontWeight:700, transform:'translateX(-50%)', whiteSpace:'nowrap' }}>NOW</span>
+              </div>
+            )}
           </div>
         </div>
 
+        {/* Empty state when there are no crews/jobs for the selected day */}
+        {!loading && crews.length === 0 && (
+          <div style={{ padding:'48px 24px', textAlign:'center' }}>
+            <div style={{ fontSize:13, fontWeight:600, color:C.textSecondary, marginBottom:4 }}>No crews scheduled for this day</div>
+            <div style={{ fontSize:12, color:C.textMuted }}>Pick another date, or schedule a new work order.</div>
+          </div>
+        )}
+
         {/* Crew rows */}
-        {SCHEDULE_CREWS.map((crew, ci) => (
-          <div key={crew.id} style={{ display:'flex', borderBottom:ci < SCHEDULE_CREWS.length-1 ? `1px solid ${C.border}` : 'none', minHeight:72 }}>
+        {crews.map((crew, ci) => (
+          <div key={crew.id} style={{ display:'flex', borderBottom:ci < crews.length-1 ? `1px solid ${C.border}` : 'none', minHeight:72 }}>
             <div style={{ width:200, flexShrink:0, padding:'12px 14px', borderRight:`1px solid ${C.border}`, display:'flex', flexDirection:'column', justifyContent:'center' }}>
               <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
                 <div style={{ width:28, height:28, borderRadius:'50%', background:crew.color+'22', display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:700, color:crew.color, flexShrink:0 }}>{crew.initials}</div>
@@ -119,7 +157,9 @@ function ScheduleView() {
             </div>
             <div style={{ flex:1, position:'relative', minHeight:72 }}>
               {hrs.map(h => <div key={h} style={{ position:'absolute', left:`${pct(h)}%`, top:0, bottom:0, borderLeft:`1px solid ${C.border}`, opacity:0.5 }} />)}
-              <div style={{ position:'absolute', left:`${pct(nowH)}%`, top:0, bottom:0, borderLeft:`2px solid ${C.danger}`, zIndex:10, opacity:0.7 }} />
+              {showingToday && nowInRange && (
+                <div style={{ position:'absolute', left:`${pct(nowH)}%`, top:0, bottom:0, borderLeft:`2px solid ${C.danger}`, zIndex:10, opacity:0.7 }} />
+              )}
               {crew.jobs.length === 0 && (
                 <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center' }}>
                   <span style={{ fontSize:12, color:C.textMuted }}>No work orders today — available</span>
@@ -127,11 +167,20 @@ function ScheduleView() {
               )}
               {crew.jobs.map((job, ji) => {
                 const isSel = selJob?.uid === `${crew.id}-${ji}`
+                // Clamp bars that start before DAY_START or end after DAY_END
+                // so long off-hours appointments still show up on the edge
+                // rather than overflowing the container.
+                const visStart = Math.max(job.start, DAY_START)
+                const visEnd   = Math.min(job.start + job.duration, DAY_END)
+                const visWidth = Math.max(visEnd - visStart, 0.25)
                 return (
                   <div key={ji} onClick={() => setSelJob(isSel ? null : { ...job, uid:`${crew.id}-${ji}`, crewName:crew.name })}
-                    style={{ position:'absolute', left:`${pct(job.start)}%`, width:`${(job.duration/TOTAL)*100}%`, top:10, bottom:10, background:job.color, borderRadius:6, cursor:'pointer', border:isSel?`2px solid ${C.textPrimary}`:`1px solid ${job.color}`, transition:'all 0.15s', overflow:'hidden', zIndex:isSel?20:5 }}>
+                    style={{ position:'absolute', left:`${pct(visStart)}%`, width:`${(visWidth/TOTAL)*100}%`, top:10, bottom:10, background:job.color, borderRadius:6, cursor:'pointer', border:isSel?`2px solid ${C.textPrimary}`:`1px solid ${job.color}`, transition:'all 0.15s', overflow:'hidden', zIndex:isSel?20:5 }}>
                     <div style={{ padding:'5px 8px' }}>
                       <div style={{ fontSize:10, fontWeight:600, color:'#fff', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{job.name}</div>
+                      {visWidth > 1.5 && (
+                        <div style={{ fontSize:9, color:'rgba(255,255,255,0.85)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', marginTop:2 }}>{job.workType}</div>
+                      )}
                     </div>
                   </div>
                 )
@@ -146,20 +195,26 @@ function ScheduleView() {
           <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:10 }}>
             <div>
               <div style={{ fontSize:14, fontWeight:600, color:C.textPrimary, marginBottom:4 }}>{selJob.name}</div>
-              <div style={{ fontSize:12, color:C.textMuted }}>{selJob.crewName} · {selJob.property}</div>
+              <div style={{ fontSize:12, color:C.textMuted }}>
+                {selJob.crewName} · {selJob.property}{selJob.building ? ` · ${selJob.building}` : ''}
+                {selJob.saRecordNumber && <span style={{ fontFamily:'JetBrains Mono, monospace', marginLeft:8 }}>{selJob.saRecordNumber}</span>}
+              </div>
             </div>
             <div style={{ display:'flex', gap:8, alignItems:'center' }}>
               <Badge s={selJob.status} />
               <button onClick={() => setSelJob(null)} style={{ background:'none', border:'none', cursor:'pointer', color:C.textMuted }}><Icon path="M18 6 6 18M6 6l12 12" size={14} /></button>
             </div>
           </div>
-          <div style={{ display:'flex', gap:20, marginBottom:12 }}>
-            {[['Work Type',selJob.workType],['Start',fH(selJob.start)],['End',fH(selJob.start+selJob.duration)],['Duration',selJob.duration+'h']].map(([l,v]) => (
+          <div style={{ display:'flex', gap:20, marginBottom:12, flexWrap:'wrap' }}>
+            {[['Work Type',selJob.workType],['Start',fH(selJob.start)],['End',fH(selJob.start+selJob.duration)],['Duration', `${selJob.duration.toFixed(2).replace(/\.?0+$/,'')}h`]].map(([l,v]) => (
               <div key={l}><div style={{ fontSize:10, color:C.textMuted, textTransform:'uppercase', letterSpacing:'0.04em', marginBottom:2 }}>{l}</div><div style={{ fontSize:13, color:C.textPrimary }}>{v}</div></div>
             ))}
           </div>
           <div style={{ display:'flex', gap:8 }}>
-            <button style={{ background:C.emerald, color:'#fff', border:'none', borderRadius:6, padding:'6px 14px', fontSize:12.5, fontWeight:500, cursor:'pointer' }}>Open Work Order</button>
+            <button
+              onClick={() => selJob.workOrderId && onOpenWorkOrder && onOpenWorkOrder(selJob.workOrderId, selJob.name)}
+              disabled={!selJob.workOrderId}
+              style={{ background:C.emerald, color:'#fff', border:'none', borderRadius:6, padding:'6px 14px', fontSize:12.5, fontWeight:500, cursor: selJob.workOrderId ? 'pointer' : 'not-allowed', opacity: selJob.workOrderId ? 1 : 0.5 }}>Open Work Order</button>
             <button style={{ background:C.page, color:C.textSecondary, border:`1px solid ${C.border}`, borderRadius:6, padding:'6px 14px', fontSize:12.5, cursor:'pointer' }}>Reassign</button>
             <button style={{ background:C.page, color:C.textSecondary, border:`1px solid ${C.border}`, borderRadius:6, padding:'6px 14px', fontSize:12.5, cursor:'pointer' }}>Reschedule</button>
           </div>
@@ -344,6 +399,14 @@ export default function FieldModule() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
+  // Schedule state lives here so the selected day survives tab switches and
+  // is re-fetched from Supabase whenever the user walks the date forward or
+  // backward. Defaults to today so the first view is immediately useful.
+  const [scheduleDate, setScheduleDate] = useState(() => new Date())
+  const [schedule, setSchedule] = useState([])
+  const [scheduleLoading, setScheduleLoading] = useState(true)
+  const [scheduleError, setScheduleError] = useState(null)
+
   const SEC_TABLE = { projects: 'projects', workorders: 'work_orders' }
   const openRecord = (row) => { if (row?._id && SEC_TABLE[sec]) setSelectedRecord({ table: SEC_TABLE[sec], id: row._id, name: row.name }) }
   const closeRecord = () => setSelectedRecord(null)
@@ -358,6 +421,20 @@ export default function FieldModule() {
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [])
+
+  // Re-fetch the schedule whenever scheduleDate changes. Kept separate from
+  // the main fetch effect so the full list views don't refetch on every
+  // date arrow click.
+  useEffect(() => {
+    let cancelled = false
+    setScheduleLoading(true)
+    setScheduleError(null)
+    fetchSchedule(scheduleDate)
+      .then(rows => { if (!cancelled) setSchedule(rows) })
+      .catch(err => { if (!cancelled) setScheduleError(err) })
+      .finally(() => { if (!cancelled) setScheduleLoading(false) })
+    return () => { cancelled = true }
+  }, [scheduleDate])
 
   const urgentCount = workOrders.filter(w => w.status==='Work Order To Be Verified'||w.status==='Work Order Corrections Needed').length
   const counts = { projects: projects.length, workorders: workOrders.length }
@@ -420,7 +497,14 @@ export default function FieldModule() {
         {sec==='home'       && <FieldHome setSec={setSec} projects={projects} workOrders={workOrders} paymentRequests={paymentRequests} />}
         {sec==='projects'   && <LiveListView loading={loading} error={error} data={projects}   columns={PROJ_COLS} systemViews={PROJ_VIEWS} defaultViewId="PJV-01" newLabel="Project"    onNew={() => setSelectedRecord({ table: 'projects', id: null, mode: 'create' })} onOpenRecord={openRecord} renderDetail={renderProjectDetail} />}
         {sec==='workorders' && <LiveListView loading={loading} error={error} data={workOrders} columns={WO_COLS}   systemViews={WO_VIEWS}   defaultViewId="WOV-01" newLabel="Work Order" onNew={() => setSelectedRecord({ table: 'work_orders', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
-        {sec==='schedule'   && <ScheduleView />}
+        {sec==='schedule'   && <ScheduleView
+          crews={schedule}
+          loading={scheduleLoading}
+          error={scheduleError}
+          selectedDate={scheduleDate}
+          setSelectedDate={setScheduleDate}
+          onOpenWorkOrder={(id, name) => setSelectedRecord({ table: 'work_orders', id, name })}
+        />}
         </>)}
       </div>
     </div>
