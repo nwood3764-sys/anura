@@ -6,6 +6,7 @@ import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import { fetchProjects, fetchWorkOrders, fetchSchedule } from '../data/fieldService'
 import { fetchPaymentRequests } from '../data/incentivesService'
+import { getCurrentUserProfile } from '../data/layoutService'
 
 const SECTIONS = [
   { id:'home',       label:'Home'         },
@@ -230,6 +231,29 @@ function FieldHome({ setSec, projects, workOrders, paymentRequests, scheduleCrew
   const toSchedProj = projects.filter(p => p.status === 'Project To Be Scheduled')
   const inProgress  = workOrders.filter(w => w.status === 'Work Order In Progress')
 
+  // Header identity — pulled once from the current Supabase auth session and
+  // joined to the app-level users/roles tables. Null while loading and also
+  // null if the auth user has no matching users row or no assigned role, in
+  // which case the header falls back to a generic label rather than showing
+  // a stale hardcoded title.
+  const [userProfile, setUserProfile] = useState({ displayName: null, roleName: null, email: null })
+  useEffect(() => {
+    let cancelled = false
+    getCurrentUserProfile()
+      .then(p => { if (!cancelled) setUserProfile(p) })
+      .catch(() => { /* leave fallback in place */ })
+    return () => { cancelled = true }
+  }, [])
+
+  const headerTitle = userProfile.roleName
+    ? `${userProfile.roleName} Dashboard`
+    : 'Dashboard'
+  // Prefer real name; if there's no users row yet, show the email local-part
+  // so the header still identifies the session holder instead of going blank.
+  const headerName =
+    userProfile.displayName ||
+    (userProfile.email ? userProfile.email.split('@')[0] : '')
+
   // Live "today" strings for the header subtitle and the Crews card
   // subtitle. Browser locale. Recomputed every render — cheap, always fresh.
   const today = new Date()
@@ -250,8 +274,10 @@ function FieldHome({ setSec, projects, workOrders, paymentRequests, scheduleCrew
       <div style={{ flex:1, overflow:'auto', padding:'20px 20px 24px' }}>
         <div style={{ marginBottom:20 }}>
           <div style={{ fontSize:11, color:C.textMuted, marginBottom:2 }}>Field / Home</div>
-          <h1 style={{ fontSize:20, fontWeight:700, color:C.textPrimary, margin:0 }}>Project Coordinator Dashboard</h1>
-          <div style={{ fontSize:12, color:C.textMuted, marginTop:3 }}>Nicholas Wood · {headerDate}</div>
+          <h1 style={{ fontSize:20, fontWeight:700, color:C.textPrimary, margin:0 }}>{headerTitle}</h1>
+          <div style={{ fontSize:12, color:C.textMuted, marginTop:3 }}>
+            {headerName ? `${headerName} · ${headerDate}` : headerDate}
+          </div>
         </div>
 
         <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12, marginBottom:16 }}>

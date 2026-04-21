@@ -16,6 +16,47 @@ export async function getCurrentUserId() {
 }
 
 /**
+ * Get the current authenticated user's display profile — display name and role
+ * name joined from users/roles. Used by module headers that render
+ * "<Role> Dashboard" / "<Display Name> · <date>".
+ *
+ * Returns { displayName, roleName, email } where either field may be null if
+ * the auth user has no matching app-level users row or no assigned role. The
+ * caller is responsible for falling back sensibly when a field is null.
+ *
+ * Cached per session to avoid re-querying on every module mount.
+ */
+let _cachedUserProfile = null
+export async function getCurrentUserProfile() {
+  if (_cachedUserProfile) return _cachedUserProfile
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { displayName: null, roleName: null, email: null }
+
+  const { data } = await supabase
+    .from('users')
+    .select('user_name, user_first_name, user_last_name, user_email, roles:role_id ( role_name )')
+    .eq('auth_user_id', user.id)
+    .maybeSingle()
+
+  // If the auth user has no corresponding app-level users row yet, the header
+  // will still render via its fallback path — we don't want to crash the UI.
+  const displayName =
+    data?.user_name ||
+    [data?.user_first_name, data?.user_last_name].filter(Boolean).join(' ').trim() ||
+    null
+
+  const profile = {
+    displayName: displayName || null,
+    roleName: data?.roles?.role_name || null,
+    email: data?.user_email || user.email || null,
+  }
+
+  _cachedUserProfile = profile
+  return profile
+}
+
+/**
  * Fetch the page layout configuration for a given object.
  * Returns { layout, sections: [{ ...section, widgets: [...] }] }
  */
