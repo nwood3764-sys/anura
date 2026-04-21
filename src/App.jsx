@@ -12,7 +12,7 @@ import IncentivesModule from './modules/IncentivesModule'
 import StockModule from './modules/StockModule'
 import FleetModule from './modules/FleetModule'
 import PeopleModule from './modules/PeopleModule'
-import AdminModule from './modules/AdminModule'
+import AdminModule from './modules/admin'
 import PortalModule from './modules/PortalModule'
 
 function AuthedApp({ session }) {
