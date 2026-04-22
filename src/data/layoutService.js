@@ -293,6 +293,62 @@ export async function insertRecord(tableName, fields) {
 }
 
 /**
+ * Apply the standard Anura insert-time defaults to a draft record. Fills in
+ * `<prefix>_record_number = 'NEW'` (the BEFORE-INSERT auto-number trigger
+ * overwrites it), `<prefix>_owner = userId`, and `<prefix>_created_by = userId`
+ * based on the table's naming convention. Mutates and returns `fields`.
+ *
+ * Handles two naming patterns:
+ *   1. The table name prefixes its columns directly (contacts → contact_*,
+ *      work_orders → work_order_*).
+ *   2. The table uses a short abbreviation (incentive_applications → ia_*,
+ *      work_step_templates → wst_*). These are enumerated explicitly.
+ *
+ * This helper is shared between RecordDetail.handleSave and the picker
+ * modal's inline-create flow so both paths produce identical inserts.
+ */
+export function applyInsertDefaults(tableName, fields, userId) {
+  const prefixes = [
+    'contact', 'property', 'opportunity', 'work_order', 'project', 'building',
+    'unit', 'assessment', 'vehicle', 'technician', 'product', 'equipment',
+  ]
+  for (const p of prefixes) {
+    if (tableName.startsWith(p) || tableName === p + 's' || tableName === p + 'ies') {
+      if (!fields[`${p}_record_number`]) fields[`${p}_record_number`] = 'NEW'
+      if (!fields[`${p}_owner`])         fields[`${p}_owner`]         = userId
+      if (!fields[`${p}_created_by`])    fields[`${p}_created_by`]    = userId
+      // Auto-derive contact_name when only first/last were typed
+      if (p === 'contact' && !fields.contact_name && fields.contact_first_name) {
+        fields.contact_name = `${fields.contact_first_name} ${fields.contact_last_name || ''}`.trim()
+      }
+      return fields
+    }
+  }
+  // Short-prefix special cases
+  if (tableName === 'incentive_applications') {
+    if (!fields.ia_record_number) fields.ia_record_number = 'NEW'
+    if (!fields.ia_owner)         fields.ia_owner         = userId
+    if (!fields.ia_created_by)    fields.ia_created_by    = userId
+  } else if (tableName === 'project_payment_requests') {
+    if (!fields.ppr_record_number) fields.ppr_record_number = 'NEW'
+    if (!fields.ppr_owner)         fields.ppr_owner         = userId
+    if (!fields.ppr_created_by)    fields.ppr_created_by    = userId
+  } else if (tableName === 'work_step_templates') {
+    // wst_record_number is populated by trg_wst_rn (BEFORE INSERT). We set a
+    // placeholder here so NOT NULL + findMissingRequired both pass; the trigger
+    // overwrites it unconditionally.
+    if (!fields.wst_record_number) fields.wst_record_number = 'NEW'
+    if (!fields.wst_owner)         fields.wst_owner         = userId
+    if (!fields.wst_created_by)    fields.wst_created_by    = userId
+  } else if (tableName === 'partner_organizations') {
+    if (!fields.owner_id)    fields.owner_id    = userId
+    if (!fields.created_by)  fields.created_by  = userId
+    if (!fields.record_type) fields.record_type = 'Partner Organization'
+  }
+  return fields
+}
+
+/**
  * Fetch lookup options for a FK field — id + display name from the
  * referenced table. Used for <select> dropdowns on lookup fields.
  */

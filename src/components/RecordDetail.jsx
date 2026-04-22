@@ -18,6 +18,7 @@ import {
   fetchPickerCandidates,
   addJunctionRow,
   removeJunctionRow,
+  applyInsertDefaults,
 } from '../data/layoutService'
 
 // ---------------------------------------------------------------------------
@@ -765,9 +766,20 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
   const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
   const [addingId, setAddingId] = useState(null)
-  const toast = useToast()
 
+  // Inline-create mode state ------------------------------------------------
+  const [mode, setMode] = useState('pick')        // 'pick' | 'create'
+  const [draft, setDraft] = useState({})
+  const [picklistOpts, setPicklistOpts] = useState({})
+  const [lookupOpts, setLookupOpts]     = useState({})
+  const [creating, setCreating] = useState(false)
+  const [formLoading, setFormLoading] = useState(false)
+
+  const toast = useToast()
   const picker = config?.picker || {}
+  const inlineCreate = picker.allow_inline_create && Array.isArray(picker.inline_create_fields)
+    ? { fields: picker.inline_create_fields, title: picker.create_modal_title, buttonLabel: picker.create_button_label }
+    : null
 
   const reload = useCallback(async () => {
     setLoading(true); setError(null)
@@ -783,12 +795,17 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
 
   useEffect(() => { reload() }, [reload])
 
-  // Close on Escape for a keyboard-friendly exit
+  // Close on Escape. In create mode, Escape returns to pick mode first so a
+  // user can back out of a half-filled form without dismissing the dialog.
   useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return
+      if (mode === 'create') { setMode('pick'); setDraft({}) }
+      else onClose()
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [onClose, mode])
 
   const q = search.trim().toLowerCase()
   const filtered = q
@@ -800,19 +817,81 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
     setAddingId(cand.id)
     try {
       await addJunctionRow(config, parentRecordId, cand.id, cand.label)
-      // Optimistically drop the just-added candidate from the local list so
-      // the user sees instant feedback before the server refresh arrives.
       setCandidates(prev => prev.filter(c => c.id !== cand.id))
       toast.success(`Added ${cand.label}`)
       if (onAdded) await onAdded()
     } catch (err) {
       toast.error(`Add failed — ${err.message || String(err)}`)
-      // Re-sync in case our optimistic update was wrong.
       reload()
     } finally {
       setAddingId(null)
     }
   }
+
+  // Enter create mode — load picklist + lookup options for the form
+  const enterCreateMode = async () => {
+    if (!inlineCreate) return
+    setMode('create')
+    setDraft({})
+    setFormLoading(true)
+    try {
+      const pickFields  = inlineCreate.fields.filter(f => f.type === 'picklist').map(f => f.name)
+      const lookupFlds  = inlineCreate.fields.filter(f => f.type === 'lookup' && f.lookup_table && f.lookup_field)
+      const [pOpts, lOpts] = await Promise.all([
+        Promise.all(pickFields.map(fn =>
+          fetchPicklistOptions(picker.source_table, fn).catch(() => []).then(v => [fn, v])
+        )).then(entries => Object.fromEntries(entries)),
+        Promise.all(lookupFlds.map(lf =>
+          fetchLookupOptions(lf.lookup_table, lf.lookup_field).catch(() => []).then(v => [lf.name, v])
+        )).then(entries => Object.fromEntries(entries)),
+      ])
+      setPicklistOpts(pOpts)
+      setLookupOpts(lOpts)
+    } finally {
+      setFormLoading(false)
+    }
+  }
+
+  const cancelCreate = () => { setMode('pick'); setDraft({}) }
+
+  // Save inline-created source record, then link it to the parent junction
+  const handleCreateAndLink = async () => {
+    if (creating) return
+    // Client-side required-field check against the configured fields list
+    const missing = inlineCreate.fields
+      .filter(f => f.required && (draft[f.name] == null || draft[f.name] === ''))
+      .map(f => f.label || f.name)
+    if (missing.length) {
+      toast.error(missing.length === 1
+        ? `Required: ${missing[0]}`
+        : `Required fields missing:\n• ${missing.join('\n• ')}`)
+      return
+    }
+    setCreating(true)
+    try {
+      const userId = await getCurrentUserId()
+      const fields = applyInsertDefaults(picker.source_table, { ...draft }, userId)
+      for (const [k, v] of Object.entries(fields)) if (v === '') fields[k] = null
+
+      const created = await insertRecord(picker.source_table, fields)
+
+      // Auto-link the new record to the parent junction so the user doesn't
+      // have to find and click it in the picker afterwards.
+      const labelField = picker.source_label_field
+      const sourceLabel = (labelField && created?.[labelField]) || created?.id?.slice(0, 8) || ''
+      await addJunctionRow(config, parentRecordId, created.id, sourceLabel)
+
+      toast.success(`Created and added ${sourceLabel}`)
+      if (onAdded) await onAdded()
+      onClose()
+    } catch (err) {
+      toast.error(`Create failed — ${err.message || String(err)}`)
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const onDraftChange = (name, value) => setDraft(prev => ({ ...prev, [name]: value }))
 
   return (
     <div
@@ -827,18 +906,31 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: C.card, borderRadius: 10, maxWidth: 520, width: '100%',
-          maxHeight: '80vh', display: 'flex', flexDirection: 'column',
+          background: C.card, borderRadius: 10, maxWidth: 560, width: '100%',
+          maxHeight: '85vh', display: 'flex', flexDirection: 'column',
           overflow: 'hidden', boxShadow: '0 10px 40px rgba(0,0,0,0.22)',
         }}
       >
         {/* Modal header */}
         <div style={{
           padding: '14px 18px', borderBottom: `1px solid ${C.border}`,
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
         }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: C.textPrimary }}>
-            {picker.modal_title || 'Add Record'}
+          <div style={{ fontSize: 14, fontWeight: 600, color: C.textPrimary, display: 'flex', alignItems: 'center', gap: 8 }}>
+            {mode === 'create' && (
+              <button
+                onClick={cancelCreate}
+                title="Back to picker"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, display: 'flex' }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = '#eef2f7' }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+              >
+                <Icon path="M15 19l-7-7 7-7" size={14} color={C.textMuted} />
+              </button>
+            )}
+            {mode === 'create'
+              ? (inlineCreate?.title || 'New Record')
+              : (picker.modal_title || 'Add Record')}
           </div>
           <button
             onClick={onClose}
@@ -854,97 +946,200 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
           </button>
         </div>
 
-        {/* Search bar */}
-        <div style={{ padding: '10px 14px', borderBottom: `1px solid ${C.border}` }}>
-          <input
-            autoFocus
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search…"
-            style={{
-              width: '100%', padding: '7px 10px', fontSize: 13,
-              border: `1px solid ${C.border}`, borderRadius: 5, outline: 'none',
-              boxSizing: 'border-box', fontFamily: 'Inter, sans-serif',
-              color: C.textPrimary,
-            }}
-          />
-        </div>
-
-        {/* Candidate list */}
-        <div style={{ flex: 1, overflow: 'auto', minHeight: 160 }}>
-          {loading && (
-            <div style={{ padding: 20, textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
-              Loading…
-            </div>
-          )}
-          {error && !loading && (
-            <div style={{ padding: 20, textAlign: 'center', color: '#b03a2e', fontSize: 12.5 }}>
-              Could not load candidates — {String(error.message || error)}
-            </div>
-          )}
-          {!loading && !error && filtered.length === 0 && (
-            <div style={{ padding: 24, textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
-              {candidates.length === 0
-                ? 'All available records are already linked to this record.'
-                : 'No matches for your search.'}
-            </div>
-          )}
-          {!loading && !error && filtered.map(c => {
-            const isAdding = addingId === c.id
-            const otherBusy = addingId !== null && !isAdding
-            return (
-              <div
-                key={c.id}
-                onClick={() => handleAdd(c)}
+        {/* ─── PICK MODE ───────────────────────────────────────────── */}
+        {mode === 'pick' && (
+          <>
+            {/* Search bar + optional "+ New" button */}
+            <div style={{
+              padding: '10px 14px', borderBottom: `1px solid ${C.border}`,
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              <input
+                autoFocus
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search…"
                 style={{
-                  padding: '10px 16px', borderBottom: `1px solid ${C.border}`,
-                  fontSize: 13, color: C.textPrimary,
-                  cursor: addingId ? 'wait' : 'pointer',
-                  opacity: otherBusy ? 0.5 : 1,
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  background: 'transparent', transition: 'background 0.1s',
+                  flex: 1, padding: '7px 10px', fontSize: 13,
+                  border: `1px solid ${C.border}`, borderRadius: 5, outline: 'none',
+                  boxSizing: 'border-box', fontFamily: 'Inter, sans-serif',
+                  color: C.textPrimary,
                 }}
-                onMouseEnter={(e) => { if (!addingId) e.currentTarget.style.background = '#f7f9fc' }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
-              >
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {c.label}
-                </span>
-                {isAdding ? (
-                  <span style={{ fontSize: 11, color: C.textMuted, fontStyle: 'italic' }}>
-                    Adding…
-                  </span>
-                ) : (
-                  <span style={{ fontSize: 11.5, color: '#1a5a8a', fontWeight: 500 }}>
-                    Add →
-                  </span>
-                )}
-              </div>
-            )
-          })}
-        </div>
+              />
+              {inlineCreate && (
+                <button
+                  onClick={enterCreateMode}
+                  style={{
+                    background: C.card, color: C.textPrimary,
+                    border: `1px solid ${C.border}`, borderRadius: 5,
+                    padding: '7px 12px', fontSize: 12.5, fontWeight: 500,
+                    cursor: 'pointer', whiteSpace: 'nowrap',
+                    display: 'flex', alignItems: 'center', gap: 5,
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = '#f7f9fc'; e.currentTarget.style.borderColor = C.emerald }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = C.card; e.currentTarget.style.borderColor = C.border }}
+                >
+                  <Icon path="M12 4v16m8-8H4" size={12} color={C.emerald} />
+                  {inlineCreate.buttonLabel || 'New'}
+                </button>
+              )}
+            </div>
 
-        {/* Footer — Done closes the modal */}
-        <div style={{
-          padding: '10px 16px', borderTop: `1px solid ${C.border}`,
-          background: '#fafbfd', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        }}>
-          <span style={{ fontSize: 11.5, color: C.textMuted }}>
-            {loading ? '' : `${filtered.length} available`}
-          </span>
-          <button
-            onClick={onClose}
-            style={{
-              background: C.emerald, color: '#fff', border: 'none', borderRadius: 6,
-              padding: '6px 14px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer',
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = '#2aab72' }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = C.emerald }}
-          >
-            Done
-          </button>
-        </div>
+            {/* Candidate list */}
+            <div style={{ flex: 1, overflow: 'auto', minHeight: 160 }}>
+              {loading && (
+                <div style={{ padding: 20, textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
+                  Loading…
+                </div>
+              )}
+              {error && !loading && (
+                <div style={{ padding: 20, textAlign: 'center', color: '#b03a2e', fontSize: 12.5 }}>
+                  Could not load candidates — {String(error.message || error)}
+                </div>
+              )}
+              {!loading && !error && filtered.length === 0 && (
+                <div style={{ padding: 24, textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
+                  {candidates.length === 0
+                    ? 'All available records are already linked to this record.'
+                    : 'No matches for your search.'}
+                  {inlineCreate && candidates.length === 0 && (
+                    <div style={{ marginTop: 10 }}>
+                      <button
+                        onClick={enterCreateMode}
+                        style={{
+                          background: C.emerald, color: '#fff', border: 'none', borderRadius: 6,
+                          padding: '6px 14px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer',
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = '#2aab72' }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = C.emerald }}
+                      >
+                        {inlineCreate.buttonLabel || 'New'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+              {!loading && !error && filtered.map(c => {
+                const isAdding = addingId === c.id
+                const otherBusy = addingId !== null && !isAdding
+                return (
+                  <div
+                    key={c.id}
+                    onClick={() => handleAdd(c)}
+                    style={{
+                      padding: '10px 16px', borderBottom: `1px solid ${C.border}`,
+                      fontSize: 13, color: C.textPrimary,
+                      cursor: addingId ? 'wait' : 'pointer',
+                      opacity: otherBusy ? 0.5 : 1,
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      background: 'transparent', transition: 'background 0.1s',
+                    }}
+                    onMouseEnter={(e) => { if (!addingId) e.currentTarget.style.background = '#f7f9fc' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+                  >
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {c.label}
+                    </span>
+                    {isAdding ? (
+                      <span style={{ fontSize: 11, color: C.textMuted, fontStyle: 'italic' }}>
+                        Adding…
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: 11.5, color: '#1a5a8a', fontWeight: 500 }}>
+                        Add →
+                      </span>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Footer — Done closes the modal */}
+            <div style={{
+              padding: '10px 16px', borderTop: `1px solid ${C.border}`,
+              background: '#fafbfd', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            }}>
+              <span style={{ fontSize: 11.5, color: C.textMuted }}>
+                {loading ? '' : `${filtered.length} available`}
+              </span>
+              <button
+                onClick={onClose}
+                style={{
+                  background: C.emerald, color: '#fff', border: 'none', borderRadius: 6,
+                  padding: '6px 14px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = '#2aab72' }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = C.emerald }}
+              >
+                Done
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* ─── CREATE MODE ─────────────────────────────────────────── */}
+        {mode === 'create' && inlineCreate && (
+          <>
+            <div style={{ flex: 1, overflow: 'auto', padding: '14px 18px' }}>
+              {formLoading && (
+                <div style={{ textAlign: 'center', color: C.textMuted, fontSize: 13, padding: 12 }}>
+                  Loading form…
+                </div>
+              )}
+              {!formLoading && inlineCreate.fields.map(f => (
+                <div key={f.name} style={{ marginBottom: 14 }}>
+                  <label style={{
+                    display: 'block', fontSize: 11.5, fontWeight: 500,
+                    color: C.textSecondary, marginBottom: 4,
+                    textTransform: 'uppercase', letterSpacing: '0.03em',
+                  }}>
+                    {f.label || f.name}
+                    {f.required && <span style={{ color: '#c0392b', marginLeft: 3 }}>*</span>}
+                  </label>
+                  <EditField
+                    field={f}
+                    value={draft[f.name]}
+                    onChange={onDraftChange}
+                    picklistOpts={picklistOpts[f.name]}
+                    lookupOpts={lookupOpts[f.name]}
+                  />
+                </div>
+              ))}
+            </div>
+
+            <div style={{
+              padding: '10px 16px', borderTop: `1px solid ${C.border}`,
+              background: '#fafbfd', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8,
+            }}>
+              <button
+                onClick={cancelCreate}
+                disabled={creating}
+                style={{
+                  background: C.card, color: C.textPrimary,
+                  border: `1px solid ${C.border}`, borderRadius: 6,
+                  padding: '6px 14px', fontSize: 12.5, fontWeight: 500,
+                  cursor: creating ? 'wait' : 'pointer', opacity: creating ? 0.6 : 1,
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateAndLink}
+                disabled={creating || formLoading}
+                style={{
+                  background: C.emerald, color: '#fff', border: 'none', borderRadius: 6,
+                  padding: '6px 14px', fontSize: 12.5, fontWeight: 500,
+                  cursor: creating ? 'wait' : 'pointer', opacity: creating || formLoading ? 0.7 : 1,
+                }}
+                onMouseEnter={(e) => { if (!creating && !formLoading) e.currentTarget.style.background = '#2aab72' }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = C.emerald }}
+              >
+                {creating ? 'Saving…' : 'Save and Add'}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
@@ -1133,47 +1328,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       // INSERT path — runs for true create and for clone
       try {
         const userId = await getCurrentUserId()
-        const fields = { ...draft }
-
-        // Auto-fill system fields based on table naming conventions
-        const prefixes = ['contact','property','opportunity','work_order','project','building','unit',
-                          'assessment','vehicle','technician','product','equipment']
-        for (const p of prefixes) {
-          if (tableName.startsWith(p) || tableName === p + 's' || tableName === p + 'ies') {
-            if (!fields[`${p}_record_number`]) fields[`${p}_record_number`] = 'NEW'
-            if (!fields[`${p}_owner`]) fields[`${p}_owner`] = userId
-            if (!fields[`${p}_created_by`]) fields[`${p}_created_by`] = userId
-            // Auto-derive name for contacts
-            if (p === 'contact' && !fields.contact_name && fields.contact_first_name) {
-              fields.contact_name = `${fields.contact_first_name} ${fields.contact_last_name || ''}`.trim()
-            }
-            break
-          }
-        }
-        // Special cases for tables with different column naming
-        if (tableName === 'incentive_applications') {
-          if (!fields.ia_record_number) fields.ia_record_number = 'NEW'
-          if (!fields.ia_owner) fields.ia_owner = userId
-          if (!fields.ia_created_by) fields.ia_created_by = userId
-        }
-        if (tableName === 'project_payment_requests') {
-          if (!fields.ppr_record_number) fields.ppr_record_number = 'NEW'
-          if (!fields.ppr_owner) fields.ppr_owner = userId
-          if (!fields.ppr_created_by) fields.ppr_created_by = userId
-        }
-        if (tableName === 'work_step_templates') {
-          // wst_record_number is assigned by trg_wst_rn (BEFORE INSERT) — we
-          // set a placeholder so findMissingRequired doesn't flag it, and the
-          // trigger overwrites it unconditionally on insert.
-          if (!fields.wst_record_number) fields.wst_record_number = 'NEW'
-          if (!fields.wst_owner) fields.wst_owner = userId
-          if (!fields.wst_created_by) fields.wst_created_by = userId
-        }
-        if (tableName === 'partner_organizations') {
-          if (!fields.owner_id) fields.owner_id = userId
-          if (!fields.created_by) fields.created_by = userId
-          if (!fields.record_type) fields.record_type = 'Partner Organization'
-        }
+        const fields = applyInsertDefaults(tableName, { ...draft }, userId)
 
         // Strip empty string values (convert to null)
         for (const [k, v] of Object.entries(fields)) {
