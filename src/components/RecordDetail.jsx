@@ -13,6 +13,11 @@ import {
   fetchPageLayout,
   loadPicklists as loadAllPicklists,
   getCurrentUserId,
+  fetchRelatedRecords,
+  reorderJunctionRows,
+  fetchPickerCandidates,
+  addJunctionRow,
+  removeJunctionRow,
 } from '../data/layoutService'
 
 // ---------------------------------------------------------------------------
@@ -379,17 +384,65 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
 
 const RELATED_LIST_MAX_ROWS = 5
 
-function RelatedListWidget({ widget, picklists, onNavigateToRecord, parentRecordId }) {
+// Render a single cell. Extracted so the editable and read-only paths can
+// share formatting without duplicating the picklist / date / number logic.
+function renderRelatedCell(col, val, picklists, { isFirstCol, canNavigate }) {
+  let shown = val
+  if (col.type === 'picklist' && shown) shown = picklists.byId.get(shown) || shown
+  if (col.type === 'date' && shown) {
+    shown = new Date(shown + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  }
+  if (col.type === 'number' && shown != null) shown = Number(shown).toLocaleString()
+  if (col.type === 'boolean') shown = shown === true ? 'Yes' : shown === false ? 'No' : shown
+  return (
+    <td key={col.name} style={{
+      padding: '10px 14px',
+      fontSize: 12.5,
+      color: isFirstCol && canNavigate ? '#1a5a8a' : C.textPrimary,
+      fontWeight: isFirstCol ? 500 : 400,
+      fontFamily: col.type === 'number' ? 'JetBrains Mono, monospace' : 'inherit',
+      whiteSpace: 'nowrap', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis',
+    }}>
+      {col.type === 'picklist' && shown ? <Badge s={shown} /> : (shown != null && shown !== '' ? shown : '—')}
+    </td>
+  )
+}
+
+function RelatedListWidget({
+  widget, picklists, onNavigateToRecord, parentRecordId, onRefreshRelated,
+}) {
   const config = widget.widget_config || {}
   const columns = config.columns || []
   const allRows = widget._relatedData || []
-  const shownRows = allRows.slice(0, RELATED_LIST_MAX_ROWS)
-  const hiddenCount = Math.max(0, allRows.length - shownRows.length)
   const [collapsed, setCollapsed] = useState(false)
+  const toast = useToast()
 
   const childTable = config.table
   const fk = config.fk
   const canNavigate = !!onNavigateToRecord && !!childTable
+
+  // Editable mode gates: config opt-in AND parent wired a refresh callback.
+  // If either is missing we render the original read-only card.
+  const editable = config.editable === true && typeof onRefreshRelated === 'function'
+  const pickerCfg = config.picker
+  const orderField = config.order_field
+
+  // Local ordered view so drag-and-drop can renumber optimistically before
+  // the reorder RPC returns. Stays in sync when the parent refetches.
+  const [localRows, setLocalRows] = useState(allRows)
+  useEffect(() => { setLocalRows(allRows) }, [allRows])
+
+  // Drag / reorder / picker UI state
+  const [dragIndex, setDragIndex] = useState(null)
+  const [dragOverIndex, setDragOverIndex] = useState(null)
+  const [savingOrder, setSavingOrder] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [removingId, setRemovingId] = useState(null)
+
+  // Editable mode shows the full list so drag targets are always visible.
+  // Read-only mode keeps the Salesforce-style truncated card.
+  const shownRows = editable ? localRows : localRows.slice(0, RELATED_LIST_MAX_ROWS)
+  const hiddenCount = editable ? 0 : Math.max(0, localRows.length - shownRows.length)
 
   const handleRowClick = (row) => {
     if (!canNavigate || !row?.id) return
@@ -403,159 +456,496 @@ function RelatedListWidget({ widget, picklists, onNavigateToRecord, parentRecord
     onNavigateToRecord({ table: childTable, id: null, mode: 'create', prefill: prefillObj })
   }
 
+  const handleAddClick = (e) => {
+    e.stopPropagation()
+    setPickerOpen(true)
+  }
+
+  // ── Drag handlers (HTML5 DnD — no library) ────────────────────────
+  const handleDragStart = (e, idx) => {
+    setDragIndex(idx)
+    e.dataTransfer.effectAllowed = 'move'
+    try { e.dataTransfer.setData('text/plain', String(idx)) } catch { /* Safari */ }
+  }
+  const handleDragOver = (e, idx) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (dragOverIndex !== idx) setDragOverIndex(idx)
+  }
+  const handleDragLeaveRow = () => setDragOverIndex(null)
+  const handleDragEnd = () => { setDragIndex(null); setDragOverIndex(null) }
+
+  const handleDrop = async (e, dropIdx) => {
+    e.preventDefault()
+    const srcIdx = dragIndex
+    setDragIndex(null); setDragOverIndex(null)
+    if (srcIdx === null || srcIdx === dropIdx) return
+
+    const before = localRows
+    const next = [...localRows]
+    const [moved] = next.splice(srcIdx, 1)
+    next.splice(dropIdx, 0, moved)
+    // Renumber the live view so the # column reflects the new order
+    // while the RPC is in flight.
+    if (orderField) {
+      next.forEach((r, i) => { r[orderField] = i + 1 })
+    }
+    setLocalRows(next)
+    setSavingOrder(true)
+    try {
+      await reorderJunctionRows(config, next.map(r => r.id))
+      if (onRefreshRelated) await onRefreshRelated()
+    } catch (err) {
+      toast.error(`Reorder failed — ${err.message || String(err)}`)
+      setLocalRows(before) // rollback
+    } finally {
+      setSavingOrder(false)
+    }
+  }
+
+  const handleRemove = async (e, row) => {
+    e.stopPropagation()
+    if (!row?.id || removingId) return
+    setRemovingId(row.id)
+    try {
+      await removeJunctionRow(config, row.id)
+      if (onRefreshRelated) await onRefreshRelated()
+      toast.success('Removed')
+    } catch (err) {
+      toast.error(`Remove failed — ${err.message || String(err)}`)
+    } finally {
+      setRemovingId(null)
+    }
+  }
+
+  const handlePickerAdded = async () => {
+    if (onRefreshRelated) await onRefreshRelated()
+  }
+
   const title = widget.widget_title || config.label || 'Related'
 
   return (
-    <div style={{
-      background: C.card,
-      border: `1px solid ${C.border}`,
-      borderRadius: 8,
-      marginBottom: 12,
-      overflow: 'hidden',
-    }}>
-      {/* Header */}
-      <div
-        onClick={() => setCollapsed((c) => !c)}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '10px 14px 10px 16px',
-          background: '#fafbfd',
-          borderBottom: collapsed ? 'none' : `1px solid ${C.border}`,
-          cursor: 'pointer',
-          userSelect: 'none',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-          <div style={{
-            width: 22, height: 22, borderRadius: 4,
-            background: '#e8f3fb', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            flexShrink: 0,
-          }}>
-            <Icon path="M4 6h16M4 12h16M4 18h7" size={12} color="#1a5a8a" />
+    <>
+      <div style={{
+        background: C.card,
+        border: `1px solid ${C.border}`,
+        borderRadius: 8,
+        marginBottom: 12,
+        overflow: 'hidden',
+      }}>
+        {/* Header */}
+        <div
+          onClick={() => setCollapsed((c) => !c)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '10px 14px 10px 16px',
+            background: '#fafbfd',
+            borderBottom: collapsed ? 'none' : `1px solid ${C.border}`,
+            cursor: 'pointer',
+            userSelect: 'none',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+            <div style={{
+              width: 22, height: 22, borderRadius: 4,
+              background: '#e8f3fb', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+            }}>
+              <Icon path="M4 6h16M4 12h16M4 18h7" size={12} color="#1a5a8a" />
+            </div>
+            <span style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {title}
+            </span>
+            <span style={{
+              background: C.page, color: C.textSecondary,
+              fontSize: 11, fontWeight: 600,
+              padding: '1px 8px', borderRadius: 10,
+              fontFamily: 'JetBrains Mono, monospace',
+            }}>
+              {allRows.length}
+            </span>
+            {editable && (
+              <span style={{
+                background: 'rgba(62,207,142,0.14)', color: '#2aab72',
+                fontSize: 10, fontWeight: 600, letterSpacing: 0.4,
+                padding: '2px 8px', borderRadius: 10,
+                textTransform: 'uppercase',
+              }}>
+                Editable
+              </span>
+            )}
+            {savingOrder && (
+              <span style={{ fontSize: 11, color: C.textMuted, fontStyle: 'italic' }}>
+                Saving order…
+              </span>
+            )}
           </div>
-          <span style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {title}
-          </span>
-          <span style={{
-            background: C.page, color: C.textSecondary,
-            fontSize: 11, fontWeight: 600,
-            padding: '1px 8px', borderRadius: 10,
-            fontFamily: 'JetBrains Mono, monospace',
-          }}>
-            {allRows.length}
-          </span>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {editable && pickerCfg ? (
+              <button
+                onClick={handleAddClick}
+                style={{
+                  background: C.emerald, color: '#fff',
+                  border: 'none', borderRadius: 5,
+                  padding: '4px 10px', fontSize: 11.5, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 4,
+                  fontWeight: 500,
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = '#2aab72' }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = C.emerald }}
+              >
+                <Icon path="M12 5v14M5 12h14" size={11} color="#fff" />
+                {pickerCfg.add_button_label || 'Add'}
+              </button>
+            ) : canNavigate ? (
+              <button
+                onClick={handleNewClick}
+                style={{
+                  background: C.card, color: C.textSecondary,
+                  border: `1px solid ${C.border}`, borderRadius: 5,
+                  padding: '4px 10px', fontSize: 11.5, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 4,
+                  fontWeight: 500,
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = '#eef2f7'; e.currentTarget.style.borderColor = C.borderDark }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = C.card; e.currentTarget.style.borderColor = C.border }}
+              >
+                <Icon path="M12 5v14M5 12h14" size={11} color={C.textSecondary} />
+                New
+              </button>
+            ) : null}
+            <Icon path={collapsed ? 'M19 9l-7 7-7-7' : 'M5 15l7-7 7 7'} size={12} color={C.textMuted} />
+          </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {canNavigate && (
-            <button
-              onClick={handleNewClick}
-              style={{
-                background: C.card, color: C.textSecondary,
-                border: `1px solid ${C.border}`, borderRadius: 5,
-                padding: '4px 10px', fontSize: 11.5, cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 4,
-                fontWeight: 500,
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = '#eef2f7'; e.currentTarget.style.borderColor = C.borderDark }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = C.card; e.currentTarget.style.borderColor = C.border }}
-            >
-              <Icon path="M12 5v14M5 12h14" size={11} color={C.textSecondary} />
-              New
-            </button>
-          )}
-          <Icon path={collapsed ? 'M19 9l-7 7-7-7' : 'M5 15l7-7 7 7'} size={12} color={C.textMuted} />
-        </div>
+        {/* Body */}
+        {!collapsed && (
+          <>
+            {shownRows.length === 0 ? (
+              <div style={{ padding: '22px 16px', fontSize: 12, color: C.textMuted, textAlign: 'center' }}>
+                No {title.toLowerCase()} related to this record.
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ borderBottom: `1px solid ${C.border}` }}>
+                      {editable && <th style={{ width: 28, padding: '8px 0 8px 14px' }} />}
+                      {columns.map((col) => (
+                        <th key={col.name} style={{
+                          textAlign: 'left', padding: '8px 14px',
+                          fontSize: 10, fontWeight: 600, color: C.textMuted,
+                          textTransform: 'uppercase', letterSpacing: '0.05em',
+                          whiteSpace: 'nowrap',
+                        }}>{col.label}</th>
+                      ))}
+                      {editable && <th style={{ width: 32, padding: '8px 14px 8px 0' }} />}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {shownRows.map((row, ri) => {
+                      const isDragging = dragIndex === ri
+                      const isDropTarget = dragOverIndex === ri && dragIndex !== null && dragIndex !== ri
+                      return (
+                        <tr
+                          key={row.id || ri}
+                          draggable={editable}
+                          onDragStart={editable ? (e) => handleDragStart(e, ri) : undefined}
+                          onDragOver={editable ? (e) => handleDragOver(e, ri) : undefined}
+                          onDragLeave={editable ? handleDragLeaveRow : undefined}
+                          onDragEnd={editable ? handleDragEnd : undefined}
+                          onDrop={editable ? (e) => handleDrop(e, ri) : undefined}
+                          onClick={editable ? undefined : () => handleRowClick(row)}
+                          onDoubleClick={() => handleRowClick(row)}
+                          style={{
+                            borderBottom: ri < shownRows.length - 1 ? `1px solid ${C.border}` : 'none',
+                            cursor: editable ? 'grab' : (canNavigate ? 'pointer' : 'default'),
+                            background: isDropTarget ? '#eff6ff' : 'transparent',
+                            opacity: isDragging ? 0.45 : 1,
+                            transition: 'background 0.1s, opacity 0.1s',
+                          }}
+                          onMouseEnter={(e) => { if (!editable && canNavigate) e.currentTarget.style.background = '#f7f9fc' }}
+                          onMouseLeave={(e) => { if (!editable) e.currentTarget.style.background = 'transparent' }}
+                        >
+                          {editable && (
+                            <td style={{ padding: '10px 0 10px 14px', width: 28, color: C.textMuted, userSelect: 'none' }}>
+                              <div
+                                title="Drag to reorder"
+                                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'grab' }}
+                              >
+                                <Icon path="M8 6h.01M8 12h.01M8 18h.01M16 6h.01M16 12h.01M16 18h.01" size={14} color={C.textMuted} />
+                              </div>
+                            </td>
+                          )}
+                          {columns.map((col, ci) =>
+                            renderRelatedCell(col, row[col.name], picklists, {
+                              isFirstCol: ci === 0,
+                              canNavigate: canNavigate && !editable,
+                            })
+                          )}
+                          {editable && (
+                            <td style={{ padding: '10px 14px 10px 0', width: 32, textAlign: 'right' }}>
+                              <button
+                                onClick={(e) => handleRemove(e, row)}
+                                disabled={removingId === row.id}
+                                title="Remove from list"
+                                style={{
+                                  background: 'none', border: 'none',
+                                  color: removingId === row.id ? C.textMuted : '#b03a2e',
+                                  cursor: removingId === row.id ? 'wait' : 'pointer',
+                                  padding: '2px 4px', borderRadius: 4, display: 'inline-flex',
+                                  alignItems: 'center', justifyContent: 'center',
+                                }}
+                                onMouseEnter={(e) => { if (removingId !== row.id) e.currentTarget.style.background = '#fef2f2' }}
+                                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+                              >
+                                <Icon path="M6 18L18 6M6 6l12 12" size={13} color="currentColor" />
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {hiddenCount > 0 && (
+              <div style={{
+                padding: '8px 14px',
+                borderTop: `1px solid ${C.border}`,
+                background: '#fafbfd',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                fontSize: 11.5,
+              }}>
+                <span style={{ color: C.textMuted }}>
+                  Showing {shownRows.length} of {allRows.length}
+                </span>
+                <span
+                  title="View All list view coming soon"
+                  style={{
+                    color: C.textMuted, fontStyle: 'italic',
+                    cursor: 'not-allowed',
+                  }}
+                >
+                  View All ({allRows.length}) →
+                </span>
+              </div>
+            )}
+          </>
+        )}
       </div>
 
-      {/* Body */}
-      {!collapsed && (
-        <>
-          {allRows.length === 0 ? (
-            <div style={{ padding: '22px 16px', fontSize: 12, color: C.textMuted, textAlign: 'center' }}>
-              No {title.toLowerCase()} related to this record.
-            </div>
-          ) : (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ borderBottom: `1px solid ${C.border}` }}>
-                    {columns.map((col) => (
-                      <th key={col.name} style={{
-                        textAlign: 'left', padding: '8px 14px',
-                        fontSize: 10, fontWeight: 600, color: C.textMuted,
-                        textTransform: 'uppercase', letterSpacing: '0.05em',
-                        whiteSpace: 'nowrap',
-                      }}>{col.label}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {shownRows.map((row, ri) => (
-                    <tr
-                      key={row.id || ri}
-                      onClick={() => handleRowClick(row)}
-                      onDoubleClick={() => handleRowClick(row)}
-                      style={{
-                        borderBottom: ri < shownRows.length - 1 ? `1px solid ${C.border}` : 'none',
-                        cursor: canNavigate ? 'pointer' : 'default',
-                        transition: 'background 0.1s',
-                      }}
-                      onMouseEnter={(e) => { if (canNavigate) e.currentTarget.style.background = '#f7f9fc' }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
-                    >
-                      {columns.map((col, ci) => {
-                        let val = row[col.name]
-                        if (col.type === 'picklist' && val) val = picklists.byId.get(val) || val
-                        if (col.type === 'date' && val) val = new Date(val + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-                        if (col.type === 'number' && val != null) val = Number(val).toLocaleString()
-                        const isFirstCol = ci === 0
-                        return (
-                          <td key={col.name} style={{
-                            padding: '10px 14px',
-                            fontSize: 12.5,
-                            color: isFirstCol && canNavigate ? '#1a5a8a' : C.textPrimary,
-                            fontWeight: isFirstCol ? 500 : 400,
-                            fontFamily: col.type === 'number' ? 'JetBrains Mono, monospace' : 'inherit',
-                            whiteSpace: 'nowrap', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis',
-                          }}>
-                            {col.type === 'picklist' && val ? <Badge s={val} /> : (val != null && val !== '' ? val : '—')}
-                          </td>
-                        )
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {hiddenCount > 0 && (
-            <div style={{
-              padding: '8px 14px',
-              borderTop: `1px solid ${C.border}`,
-              background: '#fafbfd',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              fontSize: 11.5,
-            }}>
-              <span style={{ color: C.textMuted }}>
-                Showing {shownRows.length} of {allRows.length}
-              </span>
-              <span
-                title="View All list view coming soon"
-                style={{
-                  color: C.textMuted, fontStyle: 'italic',
-                  cursor: 'not-allowed',
-                }}
-              >
-                View All ({allRows.length}) →
-              </span>
-            </div>
-          )}
-        </>
+      {pickerOpen && editable && pickerCfg && (
+        <AddFromPoolModal
+          config={config}
+          parentRecordId={parentRecordId}
+          onClose={() => setPickerOpen(false)}
+          onAdded={handlePickerAdded}
+        />
       )}
+    </>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// AddFromPoolModal — picker for an editable related list. Lists source
+// records not yet linked to the parent via the junction table, searchable.
+// Clicking a candidate inserts the junction row and keeps the modal open so
+// the user can queue multiple adds before hitting Done.
+// ---------------------------------------------------------------------------
+
+function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
+  const [candidates, setCandidates] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [search, setSearch] = useState('')
+  const [addingId, setAddingId] = useState(null)
+  const toast = useToast()
+
+  const picker = config?.picker || {}
+
+  const reload = useCallback(async () => {
+    setLoading(true); setError(null)
+    try {
+      const c = await fetchPickerCandidates(config, parentRecordId)
+      setCandidates(c)
+    } catch (err) {
+      setError(err)
+    } finally {
+      setLoading(false)
+    }
+  }, [config, parentRecordId])
+
+  useEffect(() => { reload() }, [reload])
+
+  // Close on Escape for a keyboard-friendly exit
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const q = search.trim().toLowerCase()
+  const filtered = q
+    ? candidates.filter(c => (c.label || '').toLowerCase().includes(q))
+    : candidates
+
+  const handleAdd = async (cand) => {
+    if (addingId) return
+    setAddingId(cand.id)
+    try {
+      await addJunctionRow(config, parentRecordId, cand.id, cand.label)
+      // Optimistically drop the just-added candidate from the local list so
+      // the user sees instant feedback before the server refresh arrives.
+      setCandidates(prev => prev.filter(c => c.id !== cand.id))
+      toast.success(`Added ${cand.label}`)
+      if (onAdded) await onAdded()
+    } catch (err) {
+      toast.error(`Add failed — ${err.message || String(err)}`)
+      // Re-sync in case our optimistic update was wrong.
+      reload()
+    } finally {
+      setAddingId(null)
+    }
+  }
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        background: 'rgba(13,26,46,0.48)', zIndex: 1000,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 16,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: C.card, borderRadius: 10, maxWidth: 520, width: '100%',
+          maxHeight: '80vh', display: 'flex', flexDirection: 'column',
+          overflow: 'hidden', boxShadow: '0 10px 40px rgba(0,0,0,0.22)',
+        }}
+      >
+        {/* Modal header */}
+        <div style={{
+          padding: '14px 18px', borderBottom: `1px solid ${C.border}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: C.textPrimary }}>
+            {picker.modal_title || 'Add Record'}
+          </div>
+          <button
+            onClick={onClose}
+            title="Close"
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              padding: 4, borderRadius: 4, display: 'flex',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = '#eef2f7' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+          >
+            <Icon path="M6 18L18 6M6 6l12 12" size={14} color={C.textMuted} />
+          </button>
+        </div>
+
+        {/* Search bar */}
+        <div style={{ padding: '10px 14px', borderBottom: `1px solid ${C.border}` }}>
+          <input
+            autoFocus
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search…"
+            style={{
+              width: '100%', padding: '7px 10px', fontSize: 13,
+              border: `1px solid ${C.border}`, borderRadius: 5, outline: 'none',
+              boxSizing: 'border-box', fontFamily: 'Inter, sans-serif',
+              color: C.textPrimary,
+            }}
+          />
+        </div>
+
+        {/* Candidate list */}
+        <div style={{ flex: 1, overflow: 'auto', minHeight: 160 }}>
+          {loading && (
+            <div style={{ padding: 20, textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
+              Loading…
+            </div>
+          )}
+          {error && !loading && (
+            <div style={{ padding: 20, textAlign: 'center', color: '#b03a2e', fontSize: 12.5 }}>
+              Could not load candidates — {String(error.message || error)}
+            </div>
+          )}
+          {!loading && !error && filtered.length === 0 && (
+            <div style={{ padding: 24, textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
+              {candidates.length === 0
+                ? 'All available records are already linked to this record.'
+                : 'No matches for your search.'}
+            </div>
+          )}
+          {!loading && !error && filtered.map(c => {
+            const isAdding = addingId === c.id
+            const otherBusy = addingId !== null && !isAdding
+            return (
+              <div
+                key={c.id}
+                onClick={() => handleAdd(c)}
+                style={{
+                  padding: '10px 16px', borderBottom: `1px solid ${C.border}`,
+                  fontSize: 13, color: C.textPrimary,
+                  cursor: addingId ? 'wait' : 'pointer',
+                  opacity: otherBusy ? 0.5 : 1,
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  background: 'transparent', transition: 'background 0.1s',
+                }}
+                onMouseEnter={(e) => { if (!addingId) e.currentTarget.style.background = '#f7f9fc' }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+              >
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {c.label}
+                </span>
+                {isAdding ? (
+                  <span style={{ fontSize: 11, color: C.textMuted, fontStyle: 'italic' }}>
+                    Adding…
+                  </span>
+                ) : (
+                  <span style={{ fontSize: 11.5, color: '#1a5a8a', fontWeight: 500 }}>
+                    Add →
+                  </span>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Footer — Done closes the modal */}
+        <div style={{
+          padding: '10px 16px', borderTop: `1px solid ${C.border}`,
+          background: '#fafbfd', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+          <span style={{ fontSize: 11.5, color: C.textMuted }}>
+            {loading ? '' : `${filtered.length} available`}
+          </span>
+          <button
+            onClick={onClose}
+            style={{
+              background: C.emerald, color: '#fff', border: 'none', borderRadius: 6,
+              padding: '6px 14px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = '#2aab72' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = C.emerald }}
+          >
+            Done
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -1040,6 +1430,19 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             picklists={picklists}
             onNavigateToRecord={onNavigateToRecord}
             parentRecordId={recordId}
+            onRefreshRelated={async () => {
+              try {
+                const rows = await fetchRelatedRecords(w.widget_config, recordId)
+                // Mutate the widget's cached data in place, then nudge
+                // React with a top-level data clone so the widget re-reads.
+                w._relatedData = rows
+                setData(prev => ({ ...prev }))
+              } catch (err) {
+                // Non-fatal — widget will keep showing its previous rows.
+                // eslint-disable-next-line no-console
+                console.error('Related list refresh failed', err)
+              }
+            }}
           />
         ))}
 

@@ -351,3 +351,203 @@ export async function deleteRecord(tableName, recordId) {
   if (error) throw error
   return { deleted: true, column: meta.is_deleted_column }
 }
+
+// ---------------------------------------------------------------------------
+// Editable related-list helpers — drag-to-reorder and add-from-pool picker
+// over junction tables (e.g. work_plan_template_entries).
+//
+// A junction row carries at minimum:
+//   • a parent FK       (widget_config.fk)
+//   • a source FK       (widget_config.picker.source_id_col)
+//   • an order field    (widget_config.order_field)
+//   • a soft-delete col (widget_config.is_deleted_col)
+//   • a <prefix>_record_number column auto-assigned by a BEFORE INSERT
+//     trigger — the Anura convention is to pass '' so the trigger fires.
+//
+// The order field's prefix (e.g. "wpte" from "wpte_execution_order") is
+// reused to discover sibling columns (<prefix>_name, <prefix>_created_by).
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract the snake_case prefix from a column name like "wpte_execution_order"
+ * — everything before the first underscore. Returns "" for null/undefined
+ * and the whole name if there is no underscore.
+ */
+function _derivePrefix(fieldName) {
+  if (!fieldName) return ''
+  const i = fieldName.indexOf('_')
+  return i === -1 ? fieldName : fieldName.slice(0, i)
+}
+
+/**
+ * Check whether a table has a given column. Issues a zero-row SELECT and
+ * treats an error as "column does not exist". Cached per-session.
+ */
+const _columnCache = new Map()
+async function _tableHasColumn(tableName, columnName) {
+  const key = `${tableName}.${columnName}`
+  if (_columnCache.has(key)) return _columnCache.get(key)
+  const { error } = await supabase.from(tableName).select(columnName).limit(0)
+  const exists = !error
+  _columnCache.set(key, exists)
+  return exists
+}
+
+/**
+ * Interpolate a junction row name from a picker template. Supported tokens:
+ *   {order}        → execution order as a bare integer
+ *   {order:0Nd}    → zero-padded to N digits (e.g. {order:02d} → "07")
+ *   {source_label} → the source record's human-readable label
+ *
+ * When the template is empty, falls back to the source label.
+ */
+export function interpolateNameTemplate(template, { order, sourceLabel } = {}) {
+  if (!template) return sourceLabel || ''
+  return String(template)
+    .replace(/\{order(?::0(\d+)d)?\}/g, (_m, width) => {
+      const n = Number(order ?? 0)
+      return width ? String(n).padStart(Number(width), '0') : String(n)
+    })
+    .replace(/\{source_label\}/g, sourceLabel || '')
+}
+
+/**
+ * Reorder a junction table by rewriting each row's order field to its
+ * 1-based index in `orderedIds`. Runs sequentially and bails on the first
+ * error so callers can roll back their optimistic UI state.
+ */
+export async function reorderJunctionRows(config, orderedIds) {
+  const { table, order_field: orderField } = config || {}
+  if (!table || !orderField) {
+    throw new Error('reorderJunctionRows: widget_config.order_field is required')
+  }
+  for (let i = 0; i < orderedIds.length; i++) {
+    const { error } = await supabase
+      .from(table)
+      .update({ [orderField]: i + 1 })
+      .eq('id', orderedIds[i])
+    if (error) throw error
+  }
+  return { reordered: orderedIds.length }
+}
+
+/**
+ * Fetch the source records that can still be added to this junction — not
+ * already linked to the parent and (when configured) not soft-deleted and
+ * currently active. Linked rows are filtered client-side to avoid
+ * PostgREST URL length limits on large `.not('id','in', …)` lists.
+ *
+ * Returns [{ id, label }] ordered by label.
+ */
+export async function fetchPickerCandidates(config, parentRecordId) {
+  const {
+    fk, table: junctionTable, is_deleted_col: junctionDeletedCol, picker,
+  } = config || {}
+  if (!picker?.source_table || !picker?.source_id_col || !picker?.source_label_field) {
+    throw new Error('fetchPickerCandidates: widget_config.picker is not configured')
+  }
+
+  // 1. Source IDs already linked (not soft-deleted).
+  let linkedQuery = supabase
+    .from(junctionTable)
+    .select(picker.source_id_col)
+    .eq(fk, parentRecordId)
+  if (junctionDeletedCol) linkedQuery = linkedQuery.eq(junctionDeletedCol, false)
+  const { data: linked, error: linkedErr } = await linkedQuery
+  if (linkedErr) throw linkedErr
+  const linkedIds = new Set(
+    (linked || []).map(r => r[picker.source_id_col]).filter(Boolean)
+  )
+
+  // 2. Candidate pool from the source table.
+  let candQuery = supabase
+    .from(picker.source_table)
+    .select(`id, ${picker.source_label_field}`)
+    .order(picker.source_label_field, { ascending: true })
+    .limit(500)
+  if (picker.source_deleted_col) candQuery = candQuery.eq(picker.source_deleted_col, false)
+  if (picker.source_active_col)  candQuery = candQuery.eq(picker.source_active_col, true)
+  const { data: candidates, error: candErr } = await candQuery
+  if (candErr) throw candErr
+
+  return (candidates || [])
+    .filter(r => !linkedIds.has(r.id))
+    .map(r => ({
+      id: r.id,
+      label: r[picker.source_label_field] || r.id.slice(0, 8),
+    }))
+}
+
+/**
+ * Insert a new junction row linking `sourceRecordId` to `parentRecordId`.
+ * Auto-assigns the next execution order (max+1), applies the name template
+ * if one is configured, and stamps <prefix>_created_by when that column
+ * exists. The <prefix>_record_number column is set to '' so the BEFORE
+ * INSERT trigger can populate it.
+ */
+export async function addJunctionRow(config, parentRecordId, sourceRecordId, sourceLabel) {
+  const {
+    fk, table: junctionTable, is_deleted_col: junctionDeletedCol,
+    order_field: orderField, picker,
+  } = config || {}
+  if (!junctionTable || !fk || !orderField || !picker?.source_id_col) {
+    throw new Error('addJunctionRow: widget_config is missing required keys')
+  }
+
+  // 1. Next execution order = max(existing non-deleted) + 1.
+  let maxQuery = supabase
+    .from(junctionTable)
+    .select(orderField)
+    .eq(fk, parentRecordId)
+    .order(orderField, { ascending: false })
+    .limit(1)
+  if (junctionDeletedCol) maxQuery = maxQuery.eq(junctionDeletedCol, false)
+  const { data: maxRows, error: maxErr } = await maxQuery
+  if (maxErr) throw maxErr
+  const nextOrder = Number(maxRows?.[0]?.[orderField] || 0) + 1
+
+  // 2. Compose the insert payload. Prefix like "wpte" drives sibling cols.
+  const prefix = _derivePrefix(orderField)
+  const payload = {
+    [fk]: parentRecordId,
+    [picker.source_id_col]: sourceRecordId,
+    [orderField]: nextOrder,
+  }
+
+  // Trigger-assigned record number — Anura convention: pass ''.
+  const recordNumberCol = `${prefix}_record_number`
+  if (await _tableHasColumn(junctionTable, recordNumberCol)) {
+    payload[recordNumberCol] = ''
+  }
+
+  // Name — interpolate template, fall back to source label.
+  if (picker.name_field) {
+    payload[picker.name_field] = interpolateNameTemplate(picker.name_template, {
+      order: nextOrder,
+      sourceLabel,
+    }) || sourceLabel || ''
+  }
+
+  // Stamp <prefix>_created_by when present (non-fatal if user lookup fails).
+  const createdByCol = `${prefix}_created_by`
+  if (await _tableHasColumn(junctionTable, createdByCol)) {
+    try { payload[createdByCol] = await getCurrentUserId() } catch { /* optional */ }
+  }
+
+  const { data, error } = await supabase
+    .from(junctionTable)
+    .insert(payload)
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+/**
+ * Soft-delete a junction row. Piggybacks on deleteRecord() which discovers
+ * the correct is_deleted column via fetchTableMetadata.
+ */
+export async function removeJunctionRow(config, junctionRowId) {
+  if (!config?.table) throw new Error('removeJunctionRow: widget_config.table is required')
+  return deleteRecord(config.table, junctionRowId)
+}
