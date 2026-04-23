@@ -328,14 +328,40 @@ function EditField({ field, value, onChange, picklistOpts, lookupOpts }) {
       return <textarea style={{ ...inputBase, minHeight: 64, resize: 'vertical' }}
         value={v} onChange={e => onChange(field.name, e.target.value)} />
 
-    case 'boolean':
+    case 'boolean': {
+      // Yes/No segmented buttons — unambiguous over a single checkbox whose
+      // adjacent "Yes/No" label reads like a chosen response. Three states:
+      //   value === true   → Yes button highlighted
+      //   value === false  → No  button highlighted
+      //   value == null    → neither highlighted (forces the user to pick)
+      // For inline-create flows, the modal pre-populates `draft` from each
+      // field's `default_value` so the visual state matches what will be
+      // submitted — no silent disagreement between the form and the DB row.
+      const isYes = value === true
+      const isNo  = value === false
+      const segBtn = (active) => ({
+        flex: 1, padding: '7px 12px', fontSize: 12.5, fontWeight: 500,
+        cursor: 'pointer', border: `1px solid ${active ? C.emerald : C.border}`,
+        background: active ? C.emerald : C.card,
+        color: active ? '#fff' : C.textPrimary,
+        transition: 'background 0.12s, color 0.12s, border-color 0.12s',
+        outline: 'none',
+      })
       return (
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, color: C.textPrimary }}>
-          <input type="checkbox" checked={!!value} onChange={e => onChange(field.name, e.target.checked)}
-            style={{ width: 16, height: 16, accentColor: C.emerald }} />
-          {value ? 'Yes' : 'No'}
-        </label>
+        <div style={{ display: 'flex', gap: 0, maxWidth: 200 }}>
+          <button type="button"
+            onClick={() => onChange(field.name, true)}
+            style={{ ...segBtn(isYes), borderRadius: '5px 0 0 5px', borderRightWidth: isYes || isNo ? 1 : 1 }}>
+            Yes
+          </button>
+          <button type="button"
+            onClick={() => onChange(field.name, false)}
+            style={{ ...segBtn(isNo), borderRadius: '0 5px 5px 0', borderLeftWidth: 0 }}>
+            No
+          </button>
+        </div>
       )
+    }
 
     case 'picklist': {
       const opts = picklistOpts || []
@@ -870,11 +896,20 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
     }
   }
 
-  // Enter create mode — load picklist + lookup options for the form
+  // Enter create mode — load picklist + lookup options for the form, and
+  // pre-populate the draft with each field's `default_value` so the visual
+  // state matches what will actually be submitted. Without this, boolean
+  // fields with column-default true (e.g. wst_is_active) render as
+  // unselected and silently submit `true` from the DB default — the form
+  // and the saved row disagree, which is confusing and bug-prone.
   const enterCreateMode = async () => {
     if (!inlineCreate) return
     setMode('create')
-    setDraft({})
+    const initialDraft = {}
+    for (const f of inlineCreate.fields) {
+      if (f.default_value !== undefined) initialDraft[f.name] = f.default_value
+    }
+    setDraft(initialDraft)
     setFormLoading(true)
     try {
       const pickFields  = inlineCreate.fields.filter(f => f.type === 'picklist').map(f => f.name)
