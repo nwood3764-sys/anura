@@ -263,6 +263,9 @@ export function ListView({ data, columns, systemViews, defaultViewId, newLabel, 
   const [globalSearch, setGlobalSearch] = useState('');
   const [isDirty, setIsDirty] = useState(false);
   const [selectedRow, setSelectedRow] = useState(null);
+  // Mobile-only: whether the expandable search input is shown. Tap the search
+  // icon in the mobile toolbar to toggle. Desktop always shows the search box.
+  const [showSearchMobile, setShowSearchMobile] = useState(false);
 
   const applyView = v => {
     setActiveViewId(v.id);
@@ -330,36 +333,34 @@ export function ListView({ data, columns, systemViews, defaultViewId, newLabel, 
     return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}`, color: v ? C.textSecondary : C.textMuted, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v || '—'}</td>;
   };
 
-  // ── Mobile card value formatter ────────────────────────────────────────────
-  // Returns a JSX snippet (no <td>) suitable for rendering inside a card row.
-  // Mirrors the special cases from defaultCell but without table markup.
-  const cardValue = (col, r) => {
-    const v = r[col.field];
-    if (v === null || v === undefined || v === '') return <span style={{ color: C.textMuted }}>—</span>;
-    if (col.field === 'status' || col.field === 'stage') return <Badge s={v} />;
-    if (col.field === 'program') return <ProgramTag value={v} />;
-    if (col.field === 'amount') return <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>${Number(v).toLocaleString()}</span>;
-    if (col.field === 'email') return <span style={{ color: '#1a5a8a' }}>{v}</span>;
-    if (col.field === 'id') return <span style={{ fontFamily: 'JetBrains Mono, monospace', color: C.textMuted }}>{v}</span>;
-    return <span>{String(v)}</span>;
-  };
-
-  // Pick up to 2 "secondary" fields for the body of each card — skip the ones
-  // already shown in the header (id, name, status, stage).
-  const secondaryCols = columns
-    .filter(c => !['id', 'name', 'status', 'stage'].includes(c.field))
-    .slice(0, 2);
-
   // ─── Mobile render ───────────────────────────────────────────────────────
+  // Goals: maximize records-per-screen, thumb-reachable actions, minimize chrome.
+  // Layout:
+  //   - Single-row toolbar: [View selector ▾] [search icon] [filter icon]
+  //   - Search input appears below on tap (toggled via showSearchMobile)
+  //   - Filter chips row appears below only when filters are active
+  //   - A thin 28px stats strip shows the result count
+  //   - Card list: ID (small mono) + name (16px bold) + status badge. No secondaries.
+  //   - "New" is a floating action button (FAB) in the bottom-right corner
+  //     with safe-area-inset-bottom padding so it clears the iOS home indicator.
   if (isMobile) {
     return (
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: C.page }}>
-        {/* Mobile toolbar: view selector on top row, search + new on second */}
-        <div style={{ background: C.card, borderBottom: `1px solid ${C.border}`, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 10, flexShrink: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: C.page, position: 'relative' }}>
+        {/* Compressed single-row toolbar */}
+        <div style={{
+          background: C.card, borderBottom: `1px solid ${C.border}`,
+          padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {/* View selector — takes remaining space */}
             <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
               <button onClick={() => setShowViewSel(v => !v)}
-                style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.page, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 12px', fontSize: 14, color: C.textPrimary, cursor: 'pointer', fontWeight: 500, width: '100%' }}>
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  background: C.page, border: `1px solid ${C.border}`, borderRadius: 6,
+                  padding: '8px 10px', color: C.textPrimary, cursor: 'pointer', fontWeight: 500,
+                  width: '100%', minHeight: 40,
+                }}>
                 <Icon path="M4 6h16M4 10h16M4 14h16M4 18h16" size={14} color={C.textSecondary} />
                 <span style={{ flex: 1, textAlign: 'left', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{activeViewName}</span>
                 {isDirty && <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.amber, flexShrink: 0 }} />}
@@ -367,19 +368,64 @@ export function ListView({ data, columns, systemViews, defaultViewId, newLabel, 
               </button>
               {showViewSel && <ViewSelector activeViewId={activeViewId} systemViews={systemViews} personalViews={personalViews} onSelect={applyView} onClose={() => setShowViewSel(false)} />}
             </div>
-            <button onClick={onNew} aria-label={`New ${newLabel}`}
-              style={{ background: C.emerald, color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', fontSize: 14, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2.5}><path d="M12 5v14M5 12h14" /></svg>
-              New
+
+            {/* Search toggle */}
+            <button
+              onClick={() => setShowSearchMobile(v => !v)}
+              aria-label="Toggle search"
+              style={{
+                background: showSearchMobile || globalSearch ? '#e8f8f2' : C.page,
+                border: `1px solid ${showSearchMobile || globalSearch ? C.emerald : C.border}`,
+                borderRadius: 6, width: 40, height: 40, padding: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer', flexShrink: 0,
+                color: showSearchMobile || globalSearch ? C.emerald : C.textSecondary,
+              }}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>
             </button>
+
+            {/* Save-view indicator (only when filters dirty) */}
+            {isDirty && (
+              <button
+                onClick={() => setShowSave(true)}
+                aria-label="Save view"
+                style={{
+                  background: C.page, border: `1px solid ${C.emerald}`, borderRadius: 6,
+                  width: 40, height: 40, padding: 0, cursor: 'pointer', flexShrink: 0,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  color: C.emerald,
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" /><polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" /></svg>
+              </button>
+            )}
           </div>
 
-          <div style={{ position: 'relative' }}>
-            <input placeholder="Search..." value={globalSearch} onChange={e => setGlobalSearch(e.target.value)}
-              style={{ width: '100%', background: C.page, border: `1px solid ${C.border}`, borderRadius: 6, padding: '9px 10px 9px 32px', color: C.textPrimary, outline: 'none' }} />
-            <svg style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)' }} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth={2}><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>
-          </div>
+          {/* Expandable search row */}
+          {showSearchMobile && (
+            <div style={{ position: 'relative' }}>
+              <input
+                autoFocus
+                placeholder="Search..." value={globalSearch} onChange={e => setGlobalSearch(e.target.value)}
+                style={{ width: '100%', background: C.page, border: `1px solid ${C.border}`, borderRadius: 6, padding: '10px 34px 10px 12px', color: C.textPrimary, outline: 'none' }}
+              />
+              {globalSearch && (
+                <button
+                  onClick={() => setGlobalSearch('')}
+                  aria-label="Clear search"
+                  style={{
+                    position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)',
+                    background: 'none', border: 'none', padding: 6, cursor: 'pointer', color: C.textMuted,
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M18 6 6 18M6 6l12 12" /></svg>
+                </button>
+              )}
+            </div>
+          )}
 
+          {/* Active filter chips row — only appears when filters/sort are present */}
           {(activeFilters.length > 0 || sortField) && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
               {activeFilters.map((f, i) => (
@@ -402,23 +448,28 @@ export function ListView({ data, columns, systemViews, defaultViewId, newLabel, 
               <button onClick={clearAll} style={{ background: 'none', border: 'none', fontSize: 12, color: C.textMuted, cursor: 'pointer', padding: '4px 6px' }}>Clear all</button>
             </div>
           )}
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, color: C.textMuted }}>
-            <span>{filtered.length} record{filtered.length === 1 ? '' : 's'}</span>
-            {totalAmount !== null && <span>${Math.round(totalAmount / 1000)}K pipeline</span>}
-            {totalUnits !== null && totalAmount === null && <span>{filtered.reduce((s, r) => s + (r.units || 0), 0).toLocaleString()} units</span>}
-          </div>
         </div>
 
-        {/* Card list */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '12px 12px 24px', WebkitOverflowScrolling: 'touch' }}>
+        {/* Thin stats strip */}
+        <div style={{
+          padding: '6px 14px', background: C.page, borderBottom: `1px solid ${C.border}`,
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          fontSize: 12, color: C.textSecondary, flexShrink: 0,
+        }}>
+          <span>{filtered.length} record{filtered.length === 1 ? '' : 's'}</span>
+          {totalAmount !== null && <span>${Math.round(totalAmount / 1000)}K pipeline</span>}
+          {totalUnits !== null && totalAmount === null && <span>{filtered.reduce((s, r) => s + (r.units || 0), 0).toLocaleString()} units</span>}
+        </div>
+
+        {/* Minimal card list — ID + name + status, high density */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px 96px', WebkitOverflowScrolling: 'touch' }}>
           {filtered.length === 0 ? (
-            <div style={{ padding: '40px 20px', textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
+            <div style={{ padding: '40px 20px', textAlign: 'center', color: C.textMuted }}>
               No records match the current filters.{' '}
               <span onClick={clearAll} style={{ color: '#1a5a8a', cursor: 'pointer', textDecoration: 'underline' }}>Clear filters</span>
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {filtered.map(r => {
                 const statusVal = r.status || r.stage;
                 return (
@@ -427,42 +478,55 @@ export function ListView({ data, columns, systemViews, defaultViewId, newLabel, 
                     onClick={() => onOpenRecord && onOpenRecord(r)}
                     style={{
                       background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
-                      padding: 14, cursor: 'pointer',
-                      boxShadow: '0 1px 2px rgba(13, 26, 46, 0.04)',
+                      padding: '10px 12px', cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      boxShadow: '0 1px 2px rgba(13, 26, 46, 0.03)',
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        {r.id && (
-                          <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: C.textMuted, marginBottom: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {r.id}
-                          </div>
-                        )}
-                        <div style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary, lineHeight: 1.35, wordBreak: 'break-word' }}>
-                          {r.name || '(no name)'}
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      {r.id && (
+                        <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: C.textMuted, marginBottom: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {r.id}
                         </div>
+                      )}
+                      <div style={{
+                        fontSize: 16, fontWeight: 600, color: C.textPrimary, lineHeight: 1.3,
+                        overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box',
+                        WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                      }}>
+                        {r.name || '(no name)'}
                       </div>
-                      {statusVal && <div style={{ flexShrink: 0 }}><Badge s={statusVal} /></div>}
                     </div>
-
-                    {secondaryCols.length > 0 && (
-                      <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.border}`, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        {secondaryCols.map(col => (
-                          <div key={col.field} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, fontSize: 13 }}>
-                            <span style={{ color: C.textMuted, flexShrink: 0 }}>{col.label}</span>
-                            <span style={{ color: C.textSecondary, textAlign: 'right', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {cardValue(col, r)}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                    {statusVal && <div style={{ flexShrink: 0 }}><Badge s={statusVal} /></div>}
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth={2} style={{ flexShrink: 0 }}>
+                      <path d="M9 6l6 6-6 6" />
+                    </svg>
                   </div>
                 );
               })}
             </div>
           )}
         </div>
+
+        {/* Floating Action Button for "New" — thumb-reachable bottom-right */}
+        <button
+          onClick={onNew}
+          aria-label={`New ${newLabel}`}
+          style={{
+            position: 'absolute',
+            bottom: `calc(20px + env(safe-area-inset-bottom))`,
+            right: 20,
+            width: 56, height: 56, borderRadius: '50%',
+            background: C.emerald, color: '#fff',
+            border: 'none', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 6px 16px rgba(62, 207, 142, 0.45), 0 2px 4px rgba(0,0,0,0.1)',
+            zIndex: 100,
+            padding: 0,
+          }}
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+        </button>
 
         {showSave && <SaveViewModal activeFilters={activeFilters} sortField={sortField} sortDir={sortDir} cols={columns} onSave={handleSave} onClose={() => setShowSave(false)} />}
       </div>

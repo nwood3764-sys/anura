@@ -38,6 +38,18 @@ input, select, textarea {
   input, select, textarea {
     font-size: 16px !important;
   }
+
+  /* Per-module inline topbars (breadcrumb + Reports button) are redundant
+     with the MobileHeader, which already shows the active module name.
+     Hide them on mobile to reclaim ~54px of vertical space. */
+  [data-module-topbar] {
+    display: none !important;
+  }
+
+  /* Bump body size so text is readable in daylight without zooming. */
+  body {
+    font-size: 15px;
+  }
 }
 
 /* ─── Scrollbars ─────────────────────────────────────────────────────────── */

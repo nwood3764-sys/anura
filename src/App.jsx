@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Sidebar, MobileHeader, ComingSoon } from './components/UI'
 import AuthGate from './components/AuthGate'
 import { ToastProvider } from './components/Toast'
-import { C } from './data/constants'
+import { C, NAV_MODULES } from './data/constants'
 import { supabase } from './lib/supabase'
 import HomeModule from './modules/HomeModule'
 import OutreachModule from './modules/OutreachModule'
@@ -63,7 +63,11 @@ function AuthedApp({ session }) {
         onToggleCollapse={() => setSidebarCollapsed(c => !c)}
       />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
-        <MobileHeader onOpenMenu={() => setMobileMenuOpen(true)} />
+        <MobileHeader
+          onOpenMenu={() => setMobileMenuOpen(true)}
+          moduleLabel={NAV_MODULES.find(m => m.id === activeModule)?.label || 'Anura'}
+          moduleIcon={NAV_MODULES.find(m => m.id === activeModule)?.icon}
+        />
         {renderModule()}
       </div>
     </div>

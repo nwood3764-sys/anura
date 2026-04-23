@@ -92,10 +92,13 @@ export function Topbar({ breadcrumb, onReports }) {
 }
 
 export function SectionTabs({ sections, active, onChange, counts = {}, urgentSections = {} }) {
+  const isMobile = useIsMobile();
   return (
-    <div style={{
+    <div className={isMobile ? 'anura-hscroll' : ''} style={{
       background: C.card, borderBottom: `1px solid ${C.border}`,
-      padding: '0 24px', display: 'flex', alignItems: 'center', flexShrink: 0
+      padding: isMobile ? '0 12px' : '0 24px',
+      display: 'flex', alignItems: 'center', flexShrink: 0,
+      ...(isMobile ? { scrollSnapType: 'x proximity' } : {}),
     }}>
       {sections.map(s => {
         const on = s.id === active;
@@ -103,11 +106,15 @@ export function SectionTabs({ sections, active, onChange, counts = {}, urgentSec
         const urgent = urgentSections[s.id];
         return (
           <button key={s.id} onClick={() => onChange(s.id)} style={{
-            padding: '10px 16px', background: 'none', border: 'none',
+            padding: isMobile ? '12px 14px' : '10px 16px',
+            background: 'none', border: 'none',
             borderBottom: on ? `2px solid ${C.emerald}` : '2px solid transparent',
-            color: on ? C.textPrimary : C.textMuted, fontSize: 13,
+            color: on ? C.textPrimary : C.textMuted,
+            fontSize: isMobile ? 14 : 13,
             fontWeight: on ? 500 : 400, cursor: 'pointer', marginBottom: -1,
-            display: 'flex', alignItems: 'center', gap: 6
+            display: 'flex', alignItems: 'center', gap: 6,
+            whiteSpace: 'nowrap', flexShrink: 0,
+            ...(isMobile ? { scrollSnapAlign: 'start' } : {}),
           }}>
             {s.label}
             {urgent > 0 && (
@@ -400,17 +407,19 @@ export function Sidebar({
 }
 
 // ─── MobileHeader ────────────────────────────────────────────────────────────
-// A slim 48px app bar that appears above all module content on mobile only.
-// Holds the hamburger trigger + wordmark. Renders nothing on desktop.
+// A 52px app bar that appears above all module content on mobile only.
+// Holds the hamburger trigger + the active module name. Renders nothing on
+// desktop. Intentionally replaces per-module topbars on mobile to reclaim
+// vertical space.
 // ─────────────────────────────────────────────────────────────────────────────
-export function MobileHeader({ onOpenMenu }) {
+export function MobileHeader({ onOpenMenu, moduleLabel, moduleIcon }) {
   const isMobile = useIsMobile();
   if (!isMobile) return null;
 
   return (
     <div style={{
-      height: 48, flexShrink: 0, background: C.sidebar,
-      display: 'flex', alignItems: 'center', gap: 10, padding: '0 8px 0 4px',
+      height: 52, flexShrink: 0, background: C.sidebar,
+      display: 'flex', alignItems: 'center', gap: 6, padding: '0 12px 0 4px',
       borderBottom: '1px solid rgba(255,255,255,0.07)',
     }}>
       <button
@@ -429,11 +438,17 @@ export function MobileHeader({ onOpenMenu }) {
           <line x1="3" y1="18" x2="21" y2="18" />
         </svg>
       </button>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{ width: 24, height: 24, borderRadius: 5, background: C.emerald, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="white"><path d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-        </div>
-        <span style={{ color: C.navActive, fontWeight: 600, fontSize: 15 }}>Anura</span>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
+        {moduleIcon && (
+          <Icon path={moduleIcon} color={C.navActive} size={17} />
+        )}
+        <span style={{
+          color: C.navActive, fontWeight: 600, fontSize: 17,
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        }}>
+          {moduleLabel || 'Anura'}
+        </span>
       </div>
     </div>
   );
