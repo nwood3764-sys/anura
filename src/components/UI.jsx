@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { C, STATUS_CFG, NAV_MODULES } from '../data/constants';
 import { useIsMobile } from '../lib/useMediaQuery';
 import { useSwipeToDismiss } from '../lib/useSwipeToDismiss';
+import UserMenu from './UserMenu';
 
 export function Badge({ s }) {
   const cfg = STATUS_CFG[s] || { bg: '#f0f3f8', color: '#4a5e7a', dot: '#8fa0b8' };
@@ -275,6 +276,7 @@ export function Sidebar({
   onModuleChange,
   userEmail,
   onSignOut,
+  onChangePassword,
   user = { name: 'Nicholas Wood', role: 'Admin', initials: 'NW' },
   mobileOpen = false,
   onMobileClose,
@@ -285,14 +287,11 @@ export function Sidebar({
   // `collapsed` only applies on desktop — the mobile drawer always shows full labels.
   const isCollapsed = !isMobile && collapsed;
 
-  // Derive display values from the authenticated email when available so the
-  // sidebar reflects whoever is actually signed in rather than a hardcoded
-  // default. Falls back to the `user` prop for non-auth usages.
-  const displayName = userEmail ? userEmail.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : user.name;
-  const displayInitials = userEmail
-    ? userEmail.split('@')[0].split(/[._]/).map((s) => s[0]?.toUpperCase() || '').join('').slice(0, 2)
-    : user.initials;
-  const displayRole = userEmail ? userEmail : user.role;
+  // Kept for backwards-compat with callers that passed a `user` prop; the
+  // UserMenu component now handles display-name / role resolution itself by
+  // hitting the users table. `user` remains as a seed for edge cases where no
+  // Supabase session is present (e.g. storybook-style previews).
+  void user;
 
   // ESC closes the drawer on mobile
   useEffect(() => {
@@ -388,52 +387,14 @@ export function Sidebar({
         })}
       </nav>
 
-      {/* User + sign out */}
-      <div style={{
-        padding: isMobile
-          ? '14px 20px calc(14px + env(safe-area-inset-bottom)) 20px'
-          : isCollapsed ? '12px 0' : '12px 20px',
-        borderTop: '1px solid rgba(255,255,255,0.07)',
-        display: 'flex',
-        flexDirection: isCollapsed ? 'column' : 'row',
-        alignItems: 'center',
-        gap: isCollapsed ? 10 : 10,
-      }}>
-        <div
-          title={isCollapsed ? `${displayName}\n${displayRole}` : undefined}
-          style={{
-            width: isMobile ? 32 : 28, height: isMobile ? 32 : 28, borderRadius: '50%', background: C.emerald,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: isMobile ? 12 : 11, fontWeight: 600, color: '#07111f', flexShrink: 0
-          }}
-        >
-          {displayInitials || 'U'}
-        </div>
-
-        {!isCollapsed && (
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ color: C.navActive, fontSize: isMobile ? 13 : 12, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayName}</div>
-            <div style={{ color: C.navInactive, fontSize: isMobile ? 11 : 10, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayRole}</div>
-          </div>
-        )}
-
-        {onSignOut && (
-          <button
-            onClick={onSignOut}
-            title="Sign out"
-            aria-label="Sign out"
-            style={{
-              background: 'transparent', border: 'none', padding: isMobile ? 8 : 4, borderRadius: 4,
-              cursor: 'pointer', color: C.navInactive,
-              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-            }}
-            onMouseEnter={e => { e.currentTarget.style.color = C.navActive }}
-            onMouseLeave={e => { e.currentTarget.style.color = C.navInactive }}
-          >
-            <Icon path="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" size={isMobile ? 16 : 14} color="currentColor" />
-          </button>
-        )}
-      </div>
+      {/* User menu (profile + change password + sign out) */}
+      <UserMenu
+        userEmail={userEmail}
+        onSignOut={onSignOut}
+        onChangePassword={onChangePassword}
+        isMobile={isMobile}
+        isCollapsed={isCollapsed}
+      />
     </>
   );
 

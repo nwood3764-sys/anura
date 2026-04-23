@@ -2,6 +2,7 @@ import { useState, useEffect, lazy, Suspense } from 'react'
 import { Sidebar, MobileHeader, ComingSoon } from './components/UI'
 import AuthGate from './components/AuthGate'
 import { ToastProvider } from './components/Toast'
+import PasswordChangeModal from './components/PasswordChangeModal'
 import { C, NAV_MODULES } from './data/constants'
 import { supabase } from './lib/supabase'
 import { useInputFocusScroll } from './lib/useInputFocusScroll'
@@ -53,6 +54,10 @@ function AuthedApp({ session }) {
   // Mobile menu drawer state. Desktop ignores this entirely — the Sidebar
   // component only honors mobileOpen when useIsMobile() is true.
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  // Whether the change-password modal is open. Lives at the app root rather
+  // than inside Sidebar/UserMenu because the modal is a full-screen overlay
+  // and shouldn't be clipped by the sidebar's container.
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false)
   // Desktop sidebar collapse state. Persisted to localStorage so the choice
   // survives reloads. Ignored on mobile (the drawer is always full-width).
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -137,6 +142,7 @@ function AuthedApp({ session }) {
         onModuleChange={setActiveModule}
         userEmail={session?.user?.email}
         onSignOut={handleSignOut}
+        onChangePassword={() => setPasswordModalOpen(true)}
         mobileOpen={mobileMenuOpen}
         onMobileClose={() => setMobileMenuOpen(false)}
         collapsed={sidebarCollapsed}
@@ -152,6 +158,13 @@ function AuthedApp({ session }) {
           {renderModule()}
         </Suspense>
       </div>
+
+      {passwordModalOpen && (
+        <PasswordChangeModal
+          userEmail={session?.user?.email}
+          onClose={() => setPasswordModalOpen(false)}
+        />
+      )}
     </div>
   )
 }
