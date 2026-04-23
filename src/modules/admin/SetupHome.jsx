@@ -336,13 +336,11 @@ function RecordTypesNodePane({ onOpenObjectManager }) {
 
 // ─── Work Plan Templates pane (Work Plan Builder) ──────────────────────
 //
-// Two modes:
-//   - list:   ListView of all plan templates (step count + total duration rollups)
-//   - detail: drilled into one plan — shows header + ordered step table
-//
-// The detail view intentionally does NOT route through RecordDetail because the
-// step sequence is the point of the Builder view — a generic field-section
-// record page would hide the ordered step list that matters most.
+// Bespoke pane (rather than NodePage) so we can tailor the pluralization
+// ("templates" vs "records") and the click-to-open hint. Clicking a row
+// opens RecordDetail in view mode; the New button opens RecordDetail in
+// insert mode. The detail page itself is rendered by the standard
+// dynamic page_layout system — the bespoke piece is only the list shell.
 
 function WorkPlanTemplatesPane({ onOpenRecord }) {
   const [plans, setPlans]       = useState([])
@@ -388,6 +386,8 @@ function WorkPlanTemplatesPane({ onOpenRecord }) {
           columns={WPT_COLS}
           systemViews={systemViews}
           defaultViewId="AV"
+          newLabel="Work Plan Template"
+          onNew={onOpenRecord ? () => onOpenRecord({ table: 'work_plan_templates', id: null, mode: 'create' }) : undefined}
           onOpenRecord={row => {
             if (!row?._id || !onOpenRecord) return
             onOpenRecord({

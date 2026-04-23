@@ -340,6 +340,12 @@ export function applyInsertDefaults(tableName, fields, userId) {
     if (!fields.wst_record_number) fields.wst_record_number = 'NEW'
     if (!fields.wst_owner)         fields.wst_owner         = userId
     if (!fields.wst_created_by)    fields.wst_created_by    = userId
+  } else if (tableName === 'work_plan_templates') {
+    // wpt_record_number is populated by trg_wpt_rn (BEFORE INSERT) — same
+    // pattern as WST. The trigger overwrites the placeholder unconditionally.
+    if (!fields.wpt_record_number) fields.wpt_record_number = 'NEW'
+    if (!fields.wpt_owner)         fields.wpt_owner         = userId
+    if (!fields.wpt_created_by)    fields.wpt_created_by    = userId
   } else if (tableName === 'partner_organizations') {
     if (!fields.owner_id)    fields.owner_id    = userId
     if (!fields.created_by)  fields.created_by  = userId
@@ -351,12 +357,32 @@ export function applyInsertDefaults(tableName, fields, userId) {
 /**
  * Fetch lookup options for a FK field — id + display name from the
  * referenced table. Used for <select> dropdowns on lookup fields.
+ *
+ * Soft-deleted rows are excluded automatically when the target table has
+ * a discoverable `*_is_deleted` column (via anura_table_metadata). We do
+ * NOT filter by `*_is_active` — keeping inactive rows in the option list
+ * means an existing record whose lookup currently points at an inactive
+ * target still shows the right value in edit mode rather than appearing
+ * blank.
  */
 export async function fetchLookupOptions(lookupTable, lookupField, limit = 50) {
-  const { data, error } = await supabase
+  // Discover the soft-delete column for the target table — cached for the
+  // session by fetchTableMetadata, so this is essentially free on repeat
+  // calls. Failure is non-fatal: we just don't filter.
+  let isDeletedCol = null
+  try {
+    const meta = await fetchTableMetadata(lookupTable)
+    isDeletedCol = meta?.is_deleted_column || null
+  } catch { /* metadata RPC unavailable for this table — proceed unfiltered */ }
+
+  let query = supabase
     .from(lookupTable)
     .select(`id, ${lookupField}`)
     .limit(limit)
+
+  if (isDeletedCol) query = query.eq(isDeletedCol, false)
+
+  const { data, error } = await query
 
   if (error) throw error
   return (data || []).map(r => ({
