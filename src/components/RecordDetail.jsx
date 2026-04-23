@@ -730,8 +730,47 @@ function RelatedListWidget({
         {!collapsed && (
           <>
             {shownRows.length === 0 ? (
-              <div style={{ padding: '22px 16px', fontSize: 12, color: C.textMuted, textAlign: 'center' }}>
-                No {title.toLowerCase()} related to this record.
+              <div style={{
+                padding: isMobile ? '28px 20px' : '22px 16px',
+                fontSize: isMobile ? 13 : 12,
+                color: C.textMuted, textAlign: 'center',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
+              }}>
+                <div style={{ color: C.textMuted }}>
+                  No {title.toLowerCase()} on this record{editable && pickerCfg ? ' yet' : ''}.
+                </div>
+                {editable && pickerCfg && (
+                  <button
+                    onClick={handleAddClick}
+                    style={{
+                      background: C.page, color: C.textSecondary,
+                      border: `1px solid ${C.border}`, borderRadius: 6,
+                      padding: isMobile ? '8px 14px' : '6px 12px',
+                      fontSize: isMobile ? 13 : 12, cursor: 'pointer',
+                      display: 'inline-flex', alignItems: 'center', gap: 5,
+                      minHeight: isMobile ? 36 : undefined,
+                    }}
+                  >
+                    <Icon path="M12 5v14M5 12h14" size={12} color={C.textSecondary} />
+                    {pickerCfg.add_button_label || 'Add one'}
+                  </button>
+                )}
+                {!editable && canNavigate && (
+                  <button
+                    onClick={handleNewClick}
+                    style={{
+                      background: C.page, color: C.textSecondary,
+                      border: `1px solid ${C.border}`, borderRadius: 6,
+                      padding: isMobile ? '8px 14px' : '6px 12px',
+                      fontSize: isMobile ? 13 : 12, cursor: 'pointer',
+                      display: 'inline-flex', alignItems: 'center', gap: 5,
+                      minHeight: isMobile ? 36 : undefined,
+                    }}
+                  >
+                    <Icon path="M12 5v14M5 12h14" size={12} color={C.textSecondary} />
+                    Create one
+                  </button>
+                )}
               </div>
             ) : isMobile ? (
               /* ── Mobile card layout ─────────────────────────────────────
