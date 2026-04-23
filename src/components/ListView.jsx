@@ -97,6 +97,374 @@ function FilterDropdown({ col, activeFilters, onApply, onClose }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// MobileFilterSheet — full-width bottom sheet that replaces per-column
+// filter dropdowns on mobile. Opens above a dimmed backdrop, slides up
+// from bottom, and exposes the same select / text / date filter primitives
+// desktop users get through the column-header funnel menus.
+//
+// Design notes:
+// - One expandable row per filterable column. Columns default to collapsed
+//   so the sheet isn't a wall of controls. A column that already has an
+//   active filter auto-expands so the user sees what's applied.
+// - Filter state is held locally (draft). "Apply" commits all filters
+//   atomically to the parent; "Clear all" resets the draft. This avoids
+//   the disorienting jump-to-top behavior of live-filtering on each tap.
+// - Sort is included too — picking a column/direction sets sortField and
+//   sortDir on apply. Desktop has sort in the column headers; mobile has
+//   no headers, so the sheet is the only home for it.
+// - Sheet height caps at 85vh. Content scrolls. Apply/Clear bar is sticky
+//   at the bottom with safe-area padding so it always clears the iOS home
+//   indicator.
+// ─────────────────────────────────────────────────────────────────────────────
+function MobileFilterSheet({
+  columns, activeFilters, sortField, sortDir,
+  onApply, onClose,
+}) {
+  // Columns that can actually be filtered (have a supported type)
+  const filterable = columns.filter(c => c.type === 'select' || c.type === 'text' || c.type === 'date');
+
+  // Draft state — all edits are local until Apply
+  const [draftFilters, setDraftFilters] = useState(activeFilters);
+  const [draftSortField, setDraftSortField] = useState(sortField || '');
+  const [draftSortDir, setDraftSortDir] = useState(sortDir || 'asc');
+
+  // Which column sections are expanded. Columns with active filters start open.
+  const [expanded, setExpanded] = useState(() => {
+    const init = {};
+    for (const c of filterable) {
+      if (activeFilters.some(f => f.field === c.field)) init[c.field] = true;
+    }
+    return init;
+  });
+  const toggleExpanded = (field) => setExpanded(prev => ({ ...prev, [field]: !prev[field] }));
+
+  // Helpers for reading/writing draft filters
+  const getSelValues = (col) => draftFilters.filter(f => f.field === col.field).map(f => f.value);
+  const getTextValue = (col) => {
+    const f = draftFilters.find(f => f.field === col.field && f.op === 'contains');
+    return f?.value || '';
+  };
+  const getDateValue = (col, op) => {
+    const f = draftFilters.find(f => f.field === col.field && f.op === op);
+    return f?.value || '';
+  };
+
+  const setSelValues = (col, values) => {
+    setDraftFilters(prev => {
+      const keep = prev.filter(f => f.field !== col.field);
+      return [...keep, ...values.map(v => ({ field: col.field, label: col.label, op: 'equals', value: v }))];
+    });
+  };
+  const setTextValue = (col, value) => {
+    setDraftFilters(prev => {
+      const keep = prev.filter(f => f.field !== col.field);
+      if (!value.trim()) return keep;
+      return [...keep, { field: col.field, label: col.label, op: 'contains', value: value.trim() }];
+    });
+  };
+  const setDateValue = (col, op, value) => {
+    setDraftFilters(prev => {
+      const keep = prev.filter(f => !(f.field === col.field && f.op === op));
+      if (!value) return keep;
+      return [...keep, { field: col.field, label: `${col.label} ${op}`, op, value }];
+    });
+  };
+  const clearColumn = (col) => {
+    setDraftFilters(prev => prev.filter(f => f.field !== col.field));
+  };
+
+  const clearAll = () => {
+    setDraftFilters([]);
+    setDraftSortField('');
+    setDraftSortDir('asc');
+  };
+
+  const apply = () => {
+    onApply({
+      filters: draftFilters,
+      sortField: draftSortField || null,
+      sortDir: draftSortDir,
+    });
+    onClose();
+  };
+
+  // Close on ESC
+  useEffect(() => {
+    const h = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [onClose]);
+
+  const activeCount = draftFilters.length + (draftSortField ? 1 : 0);
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        onClick={onClose}
+        style={{
+          position: 'fixed', inset: 0, background: 'rgba(7, 17, 31, 0.55)',
+          zIndex: 500, animation: 'anura-fade-in 180ms ease',
+        }}
+      />
+      {/* Sheet */}
+      <div
+        role="dialog"
+        aria-label="Filters"
+        style={{
+          position: 'fixed', left: 0, right: 0, bottom: 0,
+          background: C.card, zIndex: 510,
+          borderTopLeftRadius: 14, borderTopRightRadius: 14,
+          maxHeight: '85vh',
+          display: 'flex', flexDirection: 'column',
+          boxShadow: '0 -8px 32px rgba(0,0,0,0.25)',
+          animation: 'anura-slide-up 220ms ease',
+        }}
+      >
+        {/* Drag handle (visual cue only — not actually draggable) */}
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '8px 0 0' }}>
+          <div style={{ width: 40, height: 4, borderRadius: 2, background: C.borderDark }} />
+        </div>
+
+        {/* Header */}
+        <div style={{
+          padding: '10px 16px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          borderBottom: `1px solid ${C.border}`,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <h2 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: C.textPrimary }}>Filters</h2>
+            {activeCount > 0 && (
+              <span style={{ fontSize: 12, color: C.textMuted }}>
+                {activeCount} applied
+              </span>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close filters"
+            style={{
+              background: 'transparent', border: 'none', padding: 8, borderRadius: 6,
+              cursor: 'pointer', color: C.textSecondary,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              minWidth: 36, minHeight: 36,
+            }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Scrollable body */}
+        <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+          {/* Sort section */}
+          <div style={{ padding: '14px 16px', borderBottom: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>
+              Sort by
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <select
+                value={draftSortField}
+                onChange={(e) => setDraftSortField(e.target.value)}
+                style={{
+                  flex: 1, background: C.page, border: `1px solid ${C.border}`, borderRadius: 6,
+                  padding: '10px 12px', color: C.textPrimary, outline: 'none',
+                }}
+              >
+                <option value="">— None —</option>
+                {columns.map(c => (
+                  <option key={c.field} value={c.field}>{c.label}</option>
+                ))}
+              </select>
+              <select
+                value={draftSortDir}
+                onChange={(e) => setDraftSortDir(e.target.value)}
+                disabled={!draftSortField}
+                style={{
+                  width: 110, background: C.page, border: `1px solid ${C.border}`, borderRadius: 6,
+                  padding: '10px 12px', color: draftSortField ? C.textPrimary : C.textMuted, outline: 'none',
+                }}
+              >
+                <option value="asc">Asc ↑</option>
+                <option value="desc">Desc ↓</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Filter sections — one per filterable column */}
+          {filterable.map(col => {
+            const isOpen = !!expanded[col.field];
+            const hasFilter = draftFilters.some(f => f.field === col.field);
+            return (
+              <div key={col.field} style={{ borderBottom: `1px solid ${C.border}` }}>
+                <button
+                  onClick={() => toggleExpanded(col.field)}
+                  style={{
+                    width: '100%', background: 'transparent', border: 'none',
+                    padding: '14px 16px', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                    minHeight: 48,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                    <span style={{ fontSize: 15, fontWeight: 500, color: C.textPrimary }}>{col.label}</span>
+                    {hasFilter && (
+                      <span style={{
+                        background: 'rgba(62,207,142,0.14)', color: '#2aab72',
+                        fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10,
+                      }}>
+                        {draftFilters.filter(f => f.field === col.field).length}
+                      </span>
+                    )}
+                  </div>
+                  <svg
+                    width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth={2}
+                    style={{ transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 160ms' }}
+                  >
+                    <path d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+
+                {isOpen && (
+                  <div style={{ padding: '0 16px 14px' }}>
+                    {col.type === 'select' && (
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                          <button
+                            onClick={() => setSelValues(col, col.options)}
+                            style={{ background: 'none', border: 'none', fontSize: 13, color: '#1a5a8a', cursor: 'pointer', padding: '4px 0' }}
+                          >
+                            Select all
+                          </button>
+                          <button
+                            onClick={() => clearColumn(col)}
+                            style={{ background: 'none', border: 'none', fontSize: 13, color: C.textMuted, cursor: 'pointer', padding: '4px 0' }}
+                          >
+                            Clear
+                          </button>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          {col.options.map(o => {
+                            const selected = getSelValues(col).includes(o);
+                            return (
+                              <div
+                                key={o}
+                                onClick={() => {
+                                  const curr = getSelValues(col);
+                                  setSelValues(col, selected ? curr.filter(v => v !== o) : [...curr, o]);
+                                }}
+                                style={{
+                                  display: 'flex', alignItems: 'center', gap: 10,
+                                  padding: '10px 4px', cursor: 'pointer', borderRadius: 6,
+                                  minHeight: 40,
+                                }}
+                              >
+                                <div style={{
+                                  width: 20, height: 20, borderRadius: 4, flexShrink: 0,
+                                  border: `1.5px solid ${selected ? C.emerald : C.borderDark}`,
+                                  background: selected ? C.emerald : 'transparent',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                }}>
+                                  {selected && (
+                                    <svg width="12" height="12" viewBox="0 0 10 10" fill="none"><path d="M1.5 5L4 7.5L8.5 2.5" stroke="white" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                                  )}
+                                </div>
+                                <span style={{ color: C.textPrimary, flex: 1, minWidth: 0, wordBreak: 'break-word' }}>{o}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {col.type === 'text' && (
+                      <input
+                        value={getTextValue(col)}
+                        onChange={(e) => setTextValue(col, e.target.value)}
+                        placeholder={`Contains…`}
+                        style={{
+                          width: '100%', background: C.page, border: `1px solid ${C.border}`, borderRadius: 6,
+                          padding: '10px 12px', color: C.textPrimary, outline: 'none', boxSizing: 'border-box',
+                        }}
+                      />
+                    )}
+
+                    {col.type === 'date' && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        <div>
+                          <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 5 }}>From</div>
+                          <input
+                            type="date" value={getDateValue(col, 'from')}
+                            onChange={(e) => setDateValue(col, 'from', e.target.value)}
+                            style={{
+                              width: '100%', background: C.page, border: `1px solid ${C.border}`, borderRadius: 6,
+                              padding: '10px 12px', color: C.textPrimary, outline: 'none', boxSizing: 'border-box',
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 5 }}>To</div>
+                          <input
+                            type="date" value={getDateValue(col, 'to')}
+                            onChange={(e) => setDateValue(col, 'to', e.target.value)}
+                            style={{
+                              width: '100%', background: C.page, border: `1px solid ${C.border}`, borderRadius: 6,
+                              padding: '10px 12px', color: C.textPrimary, outline: 'none', boxSizing: 'border-box',
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {filterable.length === 0 && (
+            <div style={{ padding: '40px 20px', textAlign: 'center', color: C.textMuted, fontSize: 14 }}>
+              No filterable columns on this view.
+            </div>
+          )}
+        </div>
+
+        {/* Sticky action bar */}
+        <div style={{
+          flexShrink: 0, background: C.card, borderTop: `1px solid ${C.border}`,
+          padding: '10px 14px calc(10px + env(safe-area-inset-bottom)) 14px',
+          display: 'flex', alignItems: 'center', gap: 10,
+        }}>
+          <button
+            onClick={clearAll}
+            disabled={activeCount === 0}
+            style={{
+              flex: 1, background: C.page, color: activeCount === 0 ? C.textMuted : C.textSecondary,
+              border: `1px solid ${C.border}`, borderRadius: 8,
+              padding: '12px 16px', fontSize: 15, fontWeight: 500,
+              cursor: activeCount === 0 ? 'not-allowed' : 'pointer',
+              minHeight: 48,
+            }}
+          >
+            Clear all
+          </button>
+          <button
+            onClick={apply}
+            style={{
+              flex: 2, background: C.emerald, color: '#fff',
+              border: 'none', borderRadius: 8,
+              padding: '12px 16px', fontSize: 15, fontWeight: 600,
+              cursor: 'pointer', minHeight: 48,
+            }}
+          >
+            Apply {activeCount > 0 ? `(${activeCount})` : ''}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ── Sortable Header ──────────────────────────────────────────────────────────
 function SortableHeader({ col, sortField, sortDir, onSort, activeFilters, onFilterApply, openFilterCol, setOpenFilterCol }) {
   const isFiltered = activeFilters.some(f => f.field === col.field);
@@ -266,6 +634,8 @@ export function ListView({ data, columns, systemViews, defaultViewId, newLabel, 
   // Mobile-only: whether the expandable search input is shown. Tap the search
   // icon in the mobile toolbar to toggle. Desktop always shows the search box.
   const [showSearchMobile, setShowSearchMobile] = useState(false);
+  // Mobile-only: whether the filter bottom sheet is open.
+  const [showFilterSheet, setShowFilterSheet] = useState(false);
 
   const applyView = v => {
     setActiveViewId(v.id);
@@ -383,6 +753,38 @@ export function ListView({ data, columns, systemViews, defaultViewId, newLabel, 
               }}
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>
+            </button>
+
+            {/* Filter sheet toggle — badge shows combined filter+sort count */}
+            <button
+              onClick={() => setShowFilterSheet(true)}
+              aria-label="Filters"
+              style={{
+                position: 'relative',
+                background: (activeFilters.length > 0 || sortField) ? '#e8f8f2' : C.page,
+                border: `1px solid ${(activeFilters.length > 0 || sortField) ? C.emerald : C.border}`,
+                borderRadius: 6, width: 40, height: 40, padding: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer', flexShrink: 0,
+                color: (activeFilters.length > 0 || sortField) ? C.emerald : C.textSecondary,
+              }}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+              </svg>
+              {(activeFilters.length + (sortField ? 1 : 0)) > 0 && (
+                <span style={{
+                  position: 'absolute', top: -4, right: -4,
+                  background: C.emerald, color: '#fff',
+                  fontSize: 10, fontWeight: 700,
+                  minWidth: 16, height: 16, padding: '0 4px',
+                  borderRadius: 8, border: `2px solid ${C.card}`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  lineHeight: 1,
+                }}>
+                  {activeFilters.length + (sortField ? 1 : 0)}
+                </span>
+              )}
             </button>
 
             {/* Save-view indicator (only when filters dirty) */}
@@ -529,6 +931,21 @@ export function ListView({ data, columns, systemViews, defaultViewId, newLabel, 
         </button>
 
         {showSave && <SaveViewModal activeFilters={activeFilters} sortField={sortField} sortDir={sortDir} cols={columns} onSave={handleSave} onClose={() => setShowSave(false)} />}
+        {showFilterSheet && (
+          <MobileFilterSheet
+            columns={columns}
+            activeFilters={activeFilters}
+            sortField={sortField}
+            sortDir={sortDir}
+            onClose={() => setShowFilterSheet(false)}
+            onApply={({ filters, sortField: sf, sortDir: sd }) => {
+              setActiveFilters(filters);
+              setSortField(sf);
+              setSortDir(sd);
+              setIsDirty(true);
+            }}
+          />
+        )}
       </div>
     );
   }
