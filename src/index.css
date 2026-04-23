@@ -26,6 +26,20 @@ button {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Keyboard focus ring — only visible when the user is navigating via keyboard.
+   :focus-visible is supported everywhere Anura targets. Mouse/touch users
+   never see it. Uses the emerald accent for brand consistency. */
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid #3ecf8e;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 input, select, textarea {
   font-family: inherit;
   touch-action: manipulation;
@@ -101,4 +115,19 @@ input, select, textarea {
 @keyframes anura-shimmer {
   0%   { background-position: 200% 0; }
   100% { background-position: -200% 0; }
+}
+
+/* Respect OS-level reduced-motion preference. Users who enable "Reduce
+   Motion" in iOS/macOS accessibility settings get instant transitions and
+   no shimmer/slide animations. Keeps the app usable for vestibular
+   disorders while still animating for everyone else. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

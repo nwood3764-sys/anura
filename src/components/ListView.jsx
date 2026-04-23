@@ -922,9 +922,57 @@ export function ListView({ data, columns, systemViews, defaultViewId, newLabel, 
             </div>
           )}
           {filtered.length === 0 ? (
-            <div style={{ padding: '40px 20px', textAlign: 'center', color: C.textMuted }}>
-              No records match the current filters.{' '}
-              <span onClick={clearAll} style={{ color: '#1a5a8a', cursor: 'pointer', textDecoration: 'underline' }}>Clear filters</span>
+            <div style={{
+              padding: '56px 24px',
+              textAlign: 'center',
+              color: C.textMuted,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 12,
+            }}>
+              <div style={{
+                width: 52, height: 52, borderRadius: '50%',
+                background: C.page,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                  {/* "Inbox" icon when there's no data at all, "search" when filtered */}
+                  {data.length === 0 ? (
+                    <>
+                      <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
+                      <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+                    </>
+                  ) : (
+                    <>
+                      <circle cx="11" cy="11" r="8" />
+                      <path d="m21 21-4.35-4.35" />
+                    </>
+                  )}
+                </svg>
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 500, color: C.textPrimary }}>
+                {data.length === 0 ? `No ${newLabel ? newLabel.toLowerCase() + 's' : 'records'} yet` : 'No matching records'}
+              </div>
+              <div style={{ fontSize: 13, maxWidth: 260, lineHeight: 1.4 }}>
+                {data.length === 0
+                  ? `Tap the + button to create your first ${newLabel ? newLabel.toLowerCase() : 'record'}.`
+                  : 'Try adjusting the filters or search to find what you\'re looking for.'}
+              </div>
+              {data.length > 0 && (activeFilters.length > 0 || sortField || globalSearch) && (
+                <button
+                  onClick={() => { clearAll(); setGlobalSearch('') }}
+                  style={{
+                    marginTop: 4, background: 'transparent',
+                    border: `1px solid ${C.border}`, borderRadius: 6,
+                    padding: '8px 14px', fontSize: 13,
+                    color: C.textSecondary, cursor: 'pointer',
+                    minHeight: 36,
+                  }}
+                >
+                  Clear filters
+                </button>
+              )}
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1093,8 +1141,10 @@ export function ListView({ data, columns, systemViews, defaultViewId, newLabel, 
               <tbody>
                 {filtered.length === 0 ? (
                   <tr><td colSpan={columns.length} style={{ padding: '40px 20px', textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
-                    No records match the current filters.{' '}
-                    <span onClick={clearAll} style={{ color: '#1a5a8a', cursor: 'pointer', textDecoration: 'underline' }}>Clear filters</span>
+                    {data.length === 0
+                      ? <>No {newLabel ? newLabel.toLowerCase() + 's' : 'records'} yet. <span onClick={onNew} style={{ color: '#1a5a8a', cursor: 'pointer', textDecoration: 'underline' }}>Create one</span></>
+                      : <>No records match the current filters. <span onClick={() => { clearAll(); setGlobalSearch('') }} style={{ color: '#1a5a8a', cursor: 'pointer', textDecoration: 'underline' }}>Clear filters</span></>
+                    }
                   </td></tr>
                 ) : filtered.map(r => (
                   <TableRow key={r.id} onClick={() => setSelectedRow(selectedRow?.id === r.id ? null : r)} onDoubleClick={() => onOpenRecord && onOpenRecord(r)} selected={selectedRow?.id === r.id}>
