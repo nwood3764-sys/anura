@@ -1774,14 +1774,16 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         </button>
       )}
       <h1 style={{ fontSize: isMobile ? 18 : 20, fontWeight: 700, color: C.textPrimary, margin: '0 0 16px' }}>{displayName}</h1>
-      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16 }}>
-        <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 12 }}>No page layout configured for "{tableName}". Showing raw fields.</div>
-        {Object.entries(record).filter(([k]) => !k.endsWith('_is_deleted') && k !== 'id').map(([k, v]) => (
-          <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: `1px solid ${C.border}`, gap: 16 }}>
-            <span style={{ color: C.textMuted, fontSize: 12, flexShrink: 0 }}>{k}</span>
-            <span style={{ color: C.textPrimary, fontSize: 12, textAlign: 'right', wordBreak: 'break-all' }}>{v != null ? String(v) : '—'}</span>
-          </div>
-        ))}
+      <div style={{
+        background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
+        padding: 32, textAlign: 'center',
+      }}>
+        <div style={{ fontSize: 14, fontWeight: 500, color: C.textPrimary, marginBottom: 8 }}>
+          This record can't be displayed right now.
+        </div>
+        <div style={{ fontSize: 13, color: C.textSecondary, lineHeight: 1.5, maxWidth: 440, margin: '0 auto' }}>
+          The default page layout for this object is missing. An administrator can restore it from Admin → Object Manager, or re-run the layout generator.
+        </div>
       </div>
     </div>
   )
