@@ -21,6 +21,9 @@ import {
   buttonSmPrimaryStyle, buttonSmSecondaryStyle, buttonSmDangerStyle,
   hintBoxStyle, dangerBoxStyle,
 } from './adminStyles'
+import AddWidgetModal from './widgets/AddWidgetModal'
+import WidgetEditorFieldGroup from './widgets/WidgetEditorFieldGroup'
+import WidgetEditorRelatedList from './widgets/WidgetEditorRelatedList'
 
 // ---------------------------------------------------------------------------
 // LayoutEditor — the replacement for LayoutStructureViewer. Fully editable:
@@ -165,6 +168,7 @@ export default function LayoutEditor({
       <SectionsList
         sections={sections}
         layoutId={layoutId}
+        objectName={layout.object}
         onChanged={async () => { await refresh(); if (onLayoutsChanged) await onLayoutsChanged() }}
         disabled={busy}
       />
@@ -291,7 +295,7 @@ function MetadataCard({ layout, roles, recordTypes, sections, onSaved, disabled 
 
 // ─── Sections List ─────────────────────────────────────────────────────
 
-function SectionsList({ sections, layoutId, onChanged, disabled }) {
+function SectionsList({ sections, layoutId, objectName, onChanged, disabled }) {
   const toast = useToast()
   const [addingSection, setAddingSection] = useState(false)
   // Reordering state — follows the HTML5 DnD pattern used in RecordDetail.
@@ -379,6 +383,7 @@ function SectionsList({ sections, layoutId, onChanged, disabled }) {
           key={section.id}
           section={section}
           idx={idx}
+          objectName={objectName}
           isDragging={dragIndex === idx}
           isDropTarget={dragOverIndex === idx && dragIndex !== null && dragIndex !== idx}
           onDragStart={e => handleDragStart(e, idx)}
@@ -455,7 +460,7 @@ function AddSectionInline({ onSave, onCancel }) {
 // ─── Section Card ──────────────────────────────────────────────────────
 
 function SectionCard({
-  section, idx, isDragging, isDropTarget,
+  section, idx, objectName, isDragging, isDropTarget,
   onDragStart, onDragOver, onDragEnd, onDrop,
   onChanged, disabled,
 }) {
@@ -623,6 +628,8 @@ function SectionCard({
         {/* Widgets */}
         <WidgetsList
           sectionId={section.id}
+          sectionLabel={section.label}
+          objectName={objectName}
           widgets={section.widgets}
           onChanged={onChanged}
           disabled={disabled || editing}
@@ -643,12 +650,16 @@ function SectionCard({
 
 // ─── Widgets List ──────────────────────────────────────────────────────
 
-function WidgetsList({ sectionId, widgets, onChanged, disabled }) {
+function WidgetsList({ sectionId, sectionLabel, objectName, widgets, onChanged, disabled }) {
   const toast = useToast()
   const [localWidgets, setLocalWidgets] = useState(widgets)
   const [dragIndex, setDragIndex] = useState(null)
   const [dragOverIndex, setDragOverIndex] = useState(null)
   const [savingOrder, setSavingOrder] = useState(false)
+
+  // Modal state
+  const [addingWidget, setAddingWidget] = useState(false)
+  const [editingWidget, setEditingWidget] = useState(null) // the widget object being edited
 
   useEffect(() => { setLocalWidgets(widgets) }, [widgets])
 
@@ -701,16 +712,19 @@ function WidgetsList({ sectionId, widgets, onChanged, disabled }) {
     }
   }
 
-  if (localWidgets.length === 0) {
-    return (
-      <div style={{
-        padding: '22px 16px', textAlign: 'center',
-        background: '#fafbfd', border: `1px dashed ${C.border}`, borderRadius: 6,
-        color: C.textMuted, fontSize: 11.5, fontStyle: 'italic',
-      }}>
-        No widgets in this section yet. Widget editors will be available in the next update.
-      </div>
-    )
+  // After AddWidgetModal creates a new widget, refresh the parent layout so
+  // the new widget appears in section.widgets, then immediately open the
+  // appropriate editor for that widget — the user configures its contents
+  // without an extra click.
+  async function handleWidgetCreated(widget) {
+    setAddingWidget(false)
+    await onChanged()
+    setEditingWidget(widget)
+  }
+
+  async function handleWidgetSaved() {
+    setEditingWidget(null)
+    await onChanged()
   }
 
   return (
@@ -720,20 +734,115 @@ function WidgetsList({ sectionId, widgets, onChanged, disabled }) {
           Saving order…
         </div>
       )}
-      {localWidgets.map((w, idx) => (
-        <WidgetRow
-          key={w.id}
-          widget={w}
-          isDragging={dragIndex === idx}
-          isDropTarget={dragOverIndex === idx && dragIndex !== null && dragIndex !== idx}
-          onDragStart={e => handleDragStart(e, idx)}
-          onDragOver={e => handleDragOver(e, idx)}
-          onDragEnd={handleDragEnd}
-          onDrop={e => handleDrop(e, idx)}
-          onRemove={() => handleRemove(w)}
-          disabled={disabled || savingOrder}
+      {localWidgets.length === 0 ? (
+        <div style={{
+          padding: '22px 16px', textAlign: 'center',
+          background: '#fafbfd', border: `1px dashed ${C.border}`, borderRadius: 6,
+          color: C.textMuted, fontSize: 11.5, fontStyle: 'italic',
+          marginBottom: 8,
+        }}>
+          No widgets in this section yet.
+        </div>
+      ) : (
+        localWidgets.map((w, idx) => (
+          <WidgetRow
+            key={w.id}
+            widget={w}
+            isDragging={dragIndex === idx}
+            isDropTarget={dragOverIndex === idx && dragIndex !== null && dragIndex !== idx}
+            onDragStart={e => handleDragStart(e, idx)}
+            onDragOver={e => handleDragOver(e, idx)}
+            onDragEnd={handleDragEnd}
+            onDrop={e => handleDrop(e, idx)}
+            onEdit={() => setEditingWidget(w)}
+            onRemove={() => handleRemove(w)}
+            disabled={disabled || savingOrder}
+          />
+        ))
+      )}
+
+      {/* Add Widget button — always present, even in empty sections */}
+      <button
+        onClick={() => setAddingWidget(true)}
+        disabled={disabled}
+        style={{
+          ...buttonSmSecondaryStyle,
+          display: 'flex', alignItems: 'center', gap: 5,
+          padding: '7px 10px',
+          marginTop: 4,
+          borderStyle: 'dashed',
+          borderColor: C.borderDark || C.border,
+          width: '100%',
+          justifyContent: 'center',
+        }}
+      >
+        <Icon path="M12 5v14M5 12h14" size={12} color="currentColor" />
+        Add Widget
+      </button>
+
+      {addingWidget && (
+        <AddWidgetModal
+          sectionId={sectionId}
+          sectionLabel={sectionLabel}
+          onClose={() => setAddingWidget(false)}
+          onCreated={handleWidgetCreated}
         />
-      ))}
+      )}
+
+      {editingWidget && editingWidget.widget_type === 'field_group' && (
+        <WidgetEditorFieldGroup
+          widget={editingWidget}
+          objectName={objectName}
+          onClose={() => setEditingWidget(null)}
+          onSaved={handleWidgetSaved}
+        />
+      )}
+      {editingWidget && editingWidget.widget_type === 'related_list' && (
+        <WidgetEditorRelatedList
+          widget={editingWidget}
+          objectName={objectName}
+          onClose={() => setEditingWidget(null)}
+          onSaved={handleWidgetSaved}
+        />
+      )}
+      {editingWidget && !['field_group', 'related_list'].includes(editingWidget.widget_type) && (
+        // Unknown widget type — fall back to a placeholder so the user sees
+        // something instead of a silent no-op. Clicking Cancel closes it.
+        <UnknownWidgetTypeModal
+          widget={editingWidget}
+          onClose={() => setEditingWidget(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+function UnknownWidgetTypeModal({ widget, onClose }) {
+  return (
+    <div
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 700,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+      }}
+    >
+      <div style={{
+        background: C.card, borderRadius: 10, padding: 24,
+        width: 420, maxWidth: '100%',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+      }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: C.textPrimary, marginBottom: 6 }}>
+          No editor for this widget type
+        </div>
+        <div style={{ fontSize: 12.5, color: C.textSecondary, marginBottom: 14, lineHeight: 1.5 }}>
+          Widget type <code style={{ fontFamily: 'JetBrains Mono, monospace' }}>{widget.widget_type}</code> doesn't
+          have a dedicated contents editor yet. The widget is still in the layout and can be
+          reordered or removed as normal.
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={buttonSecondaryStyle}>Close</button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -741,7 +850,7 @@ function WidgetsList({ sectionId, widgets, onChanged, disabled }) {
 function WidgetRow({
   widget, isDragging, isDropTarget,
   onDragStart, onDragOver, onDragEnd, onDrop,
-  onRemove, disabled,
+  onEdit, onRemove, disabled,
 }) {
   const cfg = widget.widget_config || {}
   const fields = Array.isArray(cfg.fields) ? cfg.fields : []
@@ -782,13 +891,9 @@ function WidgetRow({
           {widget.page_layout_widget_record_number}
         </span>
         <button
-          style={{
-            ...buttonSmSecondaryStyle,
-            opacity: 0.5,
-            cursor: 'not-allowed',
-          }}
-          disabled
-          title="Widget contents editor arriving in the next update"
+          style={buttonSmSecondaryStyle}
+          onClick={onEdit}
+          disabled={disabled}
         >
           Edit contents
         </button>
