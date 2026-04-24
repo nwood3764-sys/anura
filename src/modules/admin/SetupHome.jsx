@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { C } from '../../data/constants'
 import { Icon, LoadingState, ErrorState } from '../../components/UI'
 import { ListView } from '../../components/ListView'
+import { useIsMobile } from '../../lib/useMediaQuery'
 import { SETUP_TREE } from './setupTree'
 import {
   fetchRoles, fetchPrograms, fetchWorkTypes,
@@ -25,6 +26,10 @@ export default function SetupHome({ onOpenObjectManager, onOpenRecord }) {
   const [expanded, setExpanded] = useState(() =>
     Object.fromEntries(SETUP_TREE.map(g => [g.id, true]))
   )
+  // On mobile we treat the two panes as a drill-in navigation stack rather
+  // than a side-by-side layout. Desktop keeps the classic Salesforce-style
+  // left tree + right detail.
+  const isMobile = useIsMobile()
 
   // Search filter — matches leaf labels, returns which groups contain matches
   const filteredTree = useMemo(() => {
@@ -51,6 +56,74 @@ export default function SetupHome({ onOpenObjectManager, onOpenRecord }) {
     setSelectedId(nodeId)
   }
 
+  // Look up the label for the current node so the mobile back header can
+  // show "< Setup Home / <Label>" while the detail is open.
+  const selectedLabel = useMemo(() => {
+    if (!selectedId) return null
+    for (const g of SETUP_TREE) {
+      const hit = g.children.find(c => c.id === selectedId)
+      if (hit) return hit.label
+    }
+    return null
+  }, [selectedId])
+
+  // Mobile drill-in: when a node is selected, show only the detail pane with
+  // a back affordance. When nothing is selected, show only the tree.
+  if (isMobile) {
+    if (selectedId) {
+      return (
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {/* Back header — tapping returns to the tree */}
+          <button
+            type="button"
+            onClick={() => setSelectedId(null)}
+            style={{
+              flexShrink: 0,
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '12px 14px',
+              background: C.card, border: 'none',
+              borderBottom: `1px solid ${C.border}`,
+              color: C.textSecondary, fontSize: 13, fontWeight: 500,
+              cursor: 'pointer', textAlign: 'left', minHeight: 44,
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
+            <span style={{ color: C.textMuted }}>Setup</span>
+            <span style={{ color: C.textMuted }}>/</span>
+            <span style={{ color: C.textPrimary }}>{selectedLabel || 'Detail'}</span>
+          </button>
+          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <NodeContent
+              nodeId={selectedId}
+              onOpenRecord={onOpenRecord}
+              onOpenObjectManager={onOpenObjectManager}
+            />
+          </div>
+        </div>
+      )
+    }
+
+    // Mobile tree view — full width, no detail pane.
+    return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: C.card }}>
+        <TreePane
+          search={search}
+          setSearch={setSearch}
+          filteredTree={filteredTree}
+          expanded={expanded}
+          setExpanded={setExpanded}
+          selectedId={selectedId}
+          onSelect={handleSelect}
+          isMobile
+        />
+      </div>
+    )
+  }
+
+  // Desktop: classic side-by-side. Tree on the left, detail on the right.
   return (
     <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
       {/* ─── Left tree nav ─────────────────────────────────────────── */}
@@ -59,86 +132,15 @@ export default function SetupHome({ onOpenObjectManager, onOpenRecord }) {
         background: C.card, borderRight: `1px solid ${C.border}`,
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
       }}>
-        {/* Search bar at top of tree */}
-        <div style={{ padding: '12px 14px', borderBottom: `1px solid ${C.border}` }}>
-          <div style={{ position: 'relative' }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"
-              style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>
-              <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-            <input
-              type="text"
-              placeholder="Quick Find"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              style={{
-                width: '100%', padding: '6px 10px 6px 30px',
-                border: `1px solid ${C.border}`, borderRadius: 5,
-                fontSize: 12.5, background: C.page,
-                color: C.textPrimary, outline: 'none', boxSizing: 'border-box',
-              }}
-              onFocus={e => e.currentTarget.style.borderColor = C.emerald}
-              onBlur={e => e.currentTarget.style.borderColor = C.border}
-            />
-          </div>
-        </div>
-
-        {/* Tree */}
-        <div style={{ flex: 1, overflow: 'auto', padding: '8px 0' }}>
-          {filteredTree.map(group => {
-            const isOpen = !!expanded[group.id]
-            return (
-              <div key={group.id}>
-                <div
-                  onClick={() => setExpanded(prev => ({ ...prev, [group.id]: !prev[group.id] }))}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    padding: '7px 14px', cursor: 'pointer',
-                    fontSize: 12, fontWeight: 600, color: C.textSecondary,
-                    textTransform: 'uppercase', letterSpacing: '0.04em',
-                    userSelect: 'none',
-                  }}
-                >
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"
-                    style={{ transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }}>
-                    <path d="M9 5l7 7-7 7" />
-                  </svg>
-                  <Icon path={group.icon} size={13} color={C.textMuted} />
-                  <span>{group.label}</span>
-                </div>
-                {isOpen && group.children.map(node => {
-                  const isActive = selectedId === node.id
-                  return (
-                    <div
-                      key={node.id}
-                      onClick={() => handleSelect(node.id)}
-                      style={{
-                        padding: '6px 14px 6px 40px',
-                        fontSize: 12.5,
-                        color: isActive ? C.textPrimary : C.textSecondary,
-                        fontWeight: isActive ? 500 : 400,
-                        background: isActive ? '#f0f9f5' : 'transparent',
-                        borderLeft: isActive ? `3px solid ${C.emerald}` : '3px solid transparent',
-                        cursor: 'pointer',
-                        transition: 'all 0.1s',
-                      }}
-                      onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = '#f7f9fc' }}
-                      onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
-                    >
-                      {node.label}
-                    </div>
-                  )
-                })}
-              </div>
-            )
-          })}
-
-          {filteredTree.length === 0 && (
-            <div style={{ padding: 20, textAlign: 'center', color: C.textMuted, fontSize: 12 }}>
-              No matches for "{search}".
-            </div>
-          )}
-        </div>
+        <TreePane
+          search={search}
+          setSearch={setSearch}
+          filteredTree={filteredTree}
+          expanded={expanded}
+          setExpanded={setExpanded}
+          selectedId={selectedId}
+          onSelect={handleSelect}
+        />
       </div>
 
       {/* ─── Right content pane ────────────────────────────────────── */}
@@ -148,6 +150,99 @@ export default function SetupHome({ onOpenObjectManager, onOpenRecord }) {
           : <WelcomePane onOpenObjectManager={onOpenObjectManager} />}
       </div>
     </div>
+  )
+}
+
+// ─── Tree pane — shared between desktop (left column) and mobile (full width).
+// Search at the top, scrollable group/leaf list below. Leaf taps fire onSelect.
+// Padding and font sizing nudged up a touch on mobile so leaves hit the 40px+
+// tap-target guideline without surgery on the desktop look.
+// ─────────────────────────────────────────────────────────────────────────────
+function TreePane({ search, setSearch, filteredTree, expanded, setExpanded, selectedId, onSelect, isMobile = false }) {
+  return (
+    <>
+      {/* Search bar at top of tree */}
+      <div style={{ padding: isMobile ? '14px 14px' : '12px 14px', borderBottom: `1px solid ${C.border}` }}>
+        <div style={{ position: 'relative' }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"
+            style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>
+            <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            type="text"
+            placeholder="Quick Find"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            style={{
+              width: '100%', padding: isMobile ? '10px 10px 10px 30px' : '6px 10px 6px 30px',
+              border: `1px solid ${C.border}`, borderRadius: 5,
+              fontSize: isMobile ? 14 : 12.5, background: C.page,
+              color: C.textPrimary, outline: 'none', boxSizing: 'border-box',
+            }}
+            onFocus={e => e.currentTarget.style.borderColor = C.emerald}
+            onBlur={e => e.currentTarget.style.borderColor = C.border}
+          />
+        </div>
+      </div>
+
+      {/* Tree */}
+      <div style={{ flex: 1, overflow: 'auto', padding: '8px 0' }}>
+        {filteredTree.map(group => {
+          const isOpen = !!expanded[group.id]
+          return (
+            <div key={group.id}>
+              <div
+                onClick={() => setExpanded(prev => ({ ...prev, [group.id]: !prev[group.id] }))}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: isMobile ? '12px 14px' : '7px 14px',
+                  cursor: 'pointer',
+                  fontSize: isMobile ? 12 : 12, fontWeight: 600, color: C.textSecondary,
+                  textTransform: 'uppercase', letterSpacing: '0.04em',
+                  userSelect: 'none',
+                }}
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"
+                  style={{ transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }}>
+                  <path d="M9 5l7 7-7 7" />
+                </svg>
+                <Icon path={group.icon} size={13} color={C.textMuted} />
+                <span>{group.label}</span>
+              </div>
+              {isOpen && group.children.map(node => {
+                const isActive = selectedId === node.id
+                return (
+                  <div
+                    key={node.id}
+                    onClick={() => onSelect(node.id)}
+                    style={{
+                      padding: isMobile ? '12px 14px 12px 40px' : '6px 14px 6px 40px',
+                      fontSize: isMobile ? 14.5 : 12.5,
+                      color: isActive ? C.textPrimary : C.textSecondary,
+                      fontWeight: isActive ? 500 : 400,
+                      background: isActive ? '#f0f9f5' : 'transparent',
+                      borderLeft: isActive ? `3px solid ${C.emerald}` : '3px solid transparent',
+                      cursor: 'pointer',
+                      transition: 'all 0.1s',
+                    }}
+                    onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = '#f7f9fc' }}
+                    onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
+                  >
+                    {node.label}
+                  </div>
+                )
+              })}
+            </div>
+          )
+        })}
+
+        {filteredTree.length === 0 && (
+          <div style={{ padding: 20, textAlign: 'center', color: C.textMuted, fontSize: 12 }}>
+            No matches for "{search}".
+          </div>
+        )}
+      </div>
+    </>
   )
 }
 
