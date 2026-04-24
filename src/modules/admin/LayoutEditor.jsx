@@ -1,0 +1,999 @@
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { C } from '../../data/constants'
+import { Icon } from '../../components/UI'
+import { useToast } from '../../components/Toast'
+import { fetchRoles, fetchPicklistsFor } from '../../data/adminService'
+import {
+  fetchLayoutForEdit,
+  updatePageLayoutMeta,
+  softDeletePageLayout,
+  createSection,
+  updateSection,
+  softDeleteSection,
+  reorderSections,
+  softDeleteWidget,
+  reorderWidgets,
+} from '../../data/pageLayoutBuilderService'
+import {
+  FormField,
+  inputStyle, textareaStyle,
+  buttonPrimaryStyle, buttonSecondaryStyle, buttonDangerStyle,
+  buttonSmPrimaryStyle, buttonSmSecondaryStyle, buttonSmDangerStyle,
+  hintBoxStyle, dangerBoxStyle,
+} from './adminStyles'
+
+// ---------------------------------------------------------------------------
+// LayoutEditor — the replacement for LayoutStructureViewer. Fully editable:
+//   - Metadata card with inline Edit/Save/Cancel (name, description, role,
+//     record type, is_default)
+//   - Section list with drag-to-reorder, inline label editing, settings
+//     popover (columns / collapsible / tab), soft delete
+//   - Widget list within each section with drag-to-reorder and soft delete
+//   - Danger zone with layout soft-delete
+//
+// Not yet in this iteration (Turn B):
+//   - Adding new widgets (needs the widget editor modals)
+//   - Editing widget contents (field picker for field_group, target picker
+//     for related_list) — "Edit contents" button is rendered disabled
+//     with a "coming next" tooltip
+// ---------------------------------------------------------------------------
+
+export default function LayoutEditor({
+  layoutId,
+  objectLabel,
+  onBack,
+  onLayoutsChanged,
+}) {
+  const toast = useToast()
+  const [struct, setStruct] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [roles, setRoles] = useState([])
+  const [recordTypes, setRecordTypes] = useState([])
+  const [busy, setBusy] = useState(false)
+
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const s = await fetchLayoutForEdit(layoutId)
+      setStruct(s)
+      if (s) {
+        // Fetch roles + record types for the metadata dropdowns (only if we
+        // haven't loaded them yet for this editor).
+        if (roles.length === 0) {
+          const [roleRows, picklistRows] = await Promise.all([
+            fetchRoles(),
+            fetchPicklistsFor(s.layout.object),
+          ])
+          setRoles(roleRows)
+          setRecordTypes(picklistRows.filter(p => p.field === 'record_type' && p.status === 'Active'))
+        }
+      }
+    } catch (err) {
+      setError(err)
+    } finally {
+      setLoading(false)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layoutId])
+
+  useEffect(() => { refresh() }, [refresh])
+
+  if (loading) {
+    return <div style={{ padding: 40, textAlign: 'center', color: C.textMuted, fontSize: 13 }}>Loading layout…</div>
+  }
+  if (error) {
+    return (
+      <div style={{ padding: 40, textAlign: 'center' }}>
+        <div style={{ color: '#b03a2e', fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Could not load layout</div>
+        <div style={{ color: C.textMuted, fontSize: 12, fontFamily: 'JetBrains Mono, monospace' }}>{String(error.message || error)}</div>
+      </div>
+    )
+  }
+  if (!struct) {
+    return <div style={{ padding: 40, textAlign: 'center', color: C.textMuted, fontSize: 13 }}>Layout not found.</div>
+  }
+
+  const { layout, sections } = struct
+
+  async function handleDeleteLayout(reason) {
+    setBusy(true)
+    try {
+      await softDeletePageLayout(layoutId, reason)
+      toast.success(`Deleted "${layout.name}"`)
+      if (onLayoutsChanged) await onLayoutsChanged()
+      onBack()
+    } catch (err) {
+      toast.error(`Delete failed: ${err.message || err}`)
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div style={{ padding: '16px 24px 48px' }}>
+      {/* Back link */}
+      <div
+        onClick={onBack}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 5,
+          fontSize: 11.5, color: C.textMuted, cursor: 'pointer', marginBottom: 12,
+        }}
+        onMouseEnter={e => e.currentTarget.style.color = C.emerald}
+        onMouseLeave={e => e.currentTarget.style.color = C.textMuted}
+      >
+        <Icon path="M15 19l-7-7 7-7" size={12} color="currentColor" /> Back to Page Layouts
+      </div>
+
+      {/* Title row */}
+      <div style={{
+        display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: 12,
+        marginBottom: 4,
+      }}>
+        <div style={{ fontSize: 20, fontWeight: 600, color: C.textPrimary }}>{layout.name}</div>
+        <div style={{ fontSize: 12, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>
+          {layout.recordNumber}
+        </div>
+        {layout.isDefault && (
+          <span style={{
+            background: '#e8f8f2', color: '#1a7a4e',
+            fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 3,
+            textTransform: 'uppercase', letterSpacing: '0.04em',
+          }}>Default</span>
+        )}
+      </div>
+      <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 16 }}>
+        {objectLabel || layout.object} · {layout.type}
+        {layout.recordTypeLabel && <> · Record Type: <strong>{layout.recordTypeLabel}</strong></>}
+        {layout.roleName && <> · Role: <strong>{layout.roleName}</strong></>}
+      </div>
+
+      {/* Metadata card */}
+      <MetadataCard
+        layout={layout}
+        roles={roles}
+        recordTypes={recordTypes}
+        sections={sections}
+        onSaved={async () => {
+          await refresh()
+          if (onLayoutsChanged) await onLayoutsChanged()
+        }}
+        disabled={busy}
+      />
+
+      {/* Sections list */}
+      <SectionsList
+        sections={sections}
+        layoutId={layoutId}
+        onChanged={async () => { await refresh(); if (onLayoutsChanged) await onLayoutsChanged() }}
+        disabled={busy}
+      />
+
+      {/* Danger zone */}
+      <DangerZone
+        layout={layout}
+        onDelete={handleDeleteLayout}
+        busy={busy}
+      />
+    </div>
+  )
+}
+
+// ─── Metadata Card ─────────────────────────────────────────────────────
+
+function MetadataCard({ layout, roles, recordTypes, sections, onSaved, disabled }) {
+  const toast = useToast()
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [name, setName] = useState(layout.name)
+  const [description, setDescription] = useState(layout.description || '')
+  const [roleId, setRoleId] = useState(layout.roleId || '')
+  const [recordTypeId, setRecordTypeId] = useState(layout.recordTypeId || '')
+  const [isDefault, setIsDefault] = useState(layout.isDefault)
+
+  // Re-sync local form state when the parent layout changes (e.g. after save).
+  useEffect(() => {
+    if (!editing) {
+      setName(layout.name)
+      setDescription(layout.description || '')
+      setRoleId(layout.roleId || '')
+      setRecordTypeId(layout.recordTypeId || '')
+      setIsDefault(layout.isDefault)
+    }
+  }, [editing, layout])
+
+  async function save() {
+    if (!name.trim()) {
+      toast.error('Name is required')
+      return
+    }
+    setSaving(true)
+    try {
+      await updatePageLayoutMeta(layout.id, {
+        name: name.trim(),
+        description: description.trim() || null,
+        roleId: roleId || null,
+        recordTypeId: recordTypeId || null,
+        isDefault,
+      })
+      toast.success('Layout updated')
+      setEditing(false)
+      await onSaved()
+    } catch (err) {
+      toast.error(`Save failed: ${err.message || err}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const widgetCount = sections.reduce((sum, s) => sum + s.widgets.length, 0)
+
+  return (
+    <div style={cardStyle}>
+      <div style={cardHeaderStyle}>
+        <span>Metadata</span>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {editing ? (
+            <>
+              <button style={buttonSmSecondaryStyle} onClick={() => setEditing(false)} disabled={saving}>Cancel</button>
+              <button style={buttonSmPrimaryStyle} onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+            </>
+          ) : (
+            <button style={buttonSmSecondaryStyle} onClick={() => setEditing(true)} disabled={disabled}>Edit</button>
+          )}
+        </div>
+      </div>
+      <div style={cardBodyStyle}>
+        {editing ? (
+          <>
+            <FormField label="Name" required>
+              <input value={name} onChange={e => setName(e.target.value)} disabled={saving} style={inputStyle} />
+            </FormField>
+            <FormField label="Description">
+              <textarea value={description} onChange={e => setDescription(e.target.value)} disabled={saving} style={textareaStyle} />
+            </FormField>
+            <FormField label="Role" hint="Blank = all roles.">
+              <select value={roleId} onChange={e => setRoleId(e.target.value)} disabled={saving} style={{ ...inputStyle, cursor: 'pointer' }}>
+                <option value="">All roles</option>
+                {roles.map(r => <option key={r._id} value={r._id}>{r.name}</option>)}
+              </select>
+            </FormField>
+            <FormField label="Record Type" hint="Blank = the master/default layout.">
+              <select value={recordTypeId} onChange={e => setRecordTypeId(e.target.value)} disabled={saving} style={{ ...inputStyle, cursor: 'pointer' }}>
+                <option value="">Master (no specific record type)</option>
+                {recordTypes.map(rt => <option key={rt._id} value={rt._id}>{rt.label}</option>)}
+              </select>
+            </FormField>
+            <FormField label="Default">
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: C.textPrimary, cursor: 'pointer' }}>
+                <input type="checkbox" checked={isDefault} onChange={e => setIsDefault(e.target.checked)} disabled={saving} />
+                Use this layout by default for its (record type, role) combination
+              </label>
+            </FormField>
+          </>
+        ) : (
+          <>
+            <KV label="Name"         value={layout.name} />
+            <KV label="Description"  value={layout.description || <em style={{ color: C.textMuted }}>No description</em>} />
+            <KV label="Object"       value={layout.object} mono />
+            <KV label="Type"         value={layout.type} mono />
+            <KV label="Role"         value={layout.roleName || <em style={{ color: C.textMuted }}>All roles</em>} />
+            <KV label="Record Type"  value={layout.recordTypeLabel || <em style={{ color: C.textMuted }}>Master (no specific record type)</em>} />
+            <KV label="Default"      value={layout.isDefault ? 'Yes' : 'No'} />
+            <KV label="Sections"     value={sections.length} mono />
+            <KV label="Widgets"      value={widgetCount} mono />
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Sections List ─────────────────────────────────────────────────────
+
+function SectionsList({ sections, layoutId, onChanged, disabled }) {
+  const toast = useToast()
+  const [addingSection, setAddingSection] = useState(false)
+  // Reordering state — follows the HTML5 DnD pattern used in RecordDetail.
+  const [localSections, setLocalSections] = useState(sections)
+  const [dragIndex, setDragIndex] = useState(null)
+  const [dragOverIndex, setDragOverIndex] = useState(null)
+  const [savingOrder, setSavingOrder] = useState(false)
+
+  // Keep localSections in sync when the parent refetches
+  useEffect(() => { setLocalSections(sections) }, [sections])
+
+  function handleDragStart(e, idx) {
+    setDragIndex(idx)
+    e.dataTransfer.effectAllowed = 'move'
+    try { e.dataTransfer.setData('text/plain', String(idx)) } catch { /* Safari */ }
+  }
+  function handleDragOver(e, idx) {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (dragOverIndex !== idx) setDragOverIndex(idx)
+  }
+  function handleDragEnd() { setDragIndex(null); setDragOverIndex(null) }
+
+  async function handleDrop(e, dropIdx) {
+    e.preventDefault()
+    const srcIdx = dragIndex
+    setDragIndex(null); setDragOverIndex(null)
+    if (srcIdx === null || srcIdx === dropIdx) return
+
+    const before = localSections
+    const next = [...localSections]
+    const [moved] = next.splice(srcIdx, 1)
+    next.splice(dropIdx, 0, moved)
+    setLocalSections(next)
+    setSavingOrder(true)
+    try {
+      await reorderSections(layoutId, next.map(s => s.id))
+      await onChanged()
+    } catch (err) {
+      toast.error(`Reorder failed: ${err.message || err}`)
+      setLocalSections(before)
+    } finally {
+      setSavingOrder(false)
+    }
+  }
+
+  async function handleAddSection(label) {
+    if (!label.trim()) return
+    try {
+      await createSection(layoutId, { label: label.trim() })
+      toast.success('Section added')
+      setAddingSection(false)
+      await onChanged()
+    } catch (err) {
+      toast.error(`Add failed: ${err.message || err}`)
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 18 }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        marginBottom: 10, padding: '0 2px',
+      }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>
+          Sections · {localSections.length}
+        </div>
+        {savingOrder && (
+          <div style={{ fontSize: 11, color: C.textMuted, fontStyle: 'italic' }}>Saving order…</div>
+        )}
+      </div>
+
+      {localSections.length === 0 && !addingSection && (
+        <div style={{
+          padding: '40px 20px', textAlign: 'center',
+          background: C.card, border: `1px dashed ${C.borderDark || C.border}`, borderRadius: 8,
+          color: C.textMuted, fontSize: 12.5, marginBottom: 10,
+        }}>
+          This layout has no sections yet.
+        </div>
+      )}
+
+      {localSections.map((section, idx) => (
+        <SectionCard
+          key={section.id}
+          section={section}
+          idx={idx}
+          isDragging={dragIndex === idx}
+          isDropTarget={dragOverIndex === idx && dragIndex !== null && dragIndex !== idx}
+          onDragStart={e => handleDragStart(e, idx)}
+          onDragOver={e => handleDragOver(e, idx)}
+          onDragEnd={handleDragEnd}
+          onDrop={e => handleDrop(e, idx)}
+          onChanged={onChanged}
+          disabled={disabled || savingOrder}
+        />
+      ))}
+
+      {addingSection ? (
+        <AddSectionInline onSave={handleAddSection} onCancel={() => setAddingSection(false)} />
+      ) : (
+        <button
+          onClick={() => setAddingSection(true)}
+          disabled={disabled}
+          style={{
+            ...buttonSecondaryStyle,
+            marginTop: 8,
+            borderStyle: 'dashed',
+            borderColor: C.borderDark || C.border,
+            width: '100%',
+            justifyContent: 'center',
+            padding: '12px',
+          }}
+        >
+          <Icon path="M12 5v14M5 12h14" size={13} color="currentColor" />
+          Add Section
+        </button>
+      )}
+    </div>
+  )
+}
+
+function AddSectionInline({ onSave, onCancel }) {
+  const [label, setLabel] = useState('')
+  const [busy, setBusy] = useState(false)
+  const inputRef = useRef(null)
+  useEffect(() => { inputRef.current?.focus() }, [])
+
+  async function save() {
+    setBusy(true)
+    await onSave(label)
+    setBusy(false)
+  }
+
+  return (
+    <div style={{
+      background: C.card, border: `1px solid ${C.borderDark || C.border}`, borderRadius: 8,
+      padding: 12, marginTop: 8,
+      display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
+    }}>
+      <input
+        ref={inputRef}
+        value={label}
+        onChange={e => setLabel(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === 'Enter' && label.trim()) save()
+          if (e.key === 'Escape') onCancel()
+        }}
+        placeholder="Section name (e.g. Basic Information)"
+        disabled={busy}
+        style={{ ...inputStyle, flex: 1, minWidth: 200 }}
+      />
+      <button style={buttonSmSecondaryStyle} onClick={onCancel} disabled={busy}>Cancel</button>
+      <button style={buttonSmPrimaryStyle} onClick={save} disabled={busy || !label.trim()}>
+        {busy ? 'Adding…' : 'Add Section'}
+      </button>
+    </div>
+  )
+}
+
+// ─── Section Card ──────────────────────────────────────────────────────
+
+function SectionCard({
+  section, idx, isDragging, isDropTarget,
+  onDragStart, onDragOver, onDragEnd, onDrop,
+  onChanged, disabled,
+}) {
+  const toast = useToast()
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [label, setLabel] = useState(section.label || '')
+  const [columns, setColumns] = useState(section.columns || 3)
+  const [collapsible, setCollapsible] = useState(section.isCollapsible)
+  const [collapsedByDefault, setCollapsedByDefault] = useState(section.isCollapsedByDefault)
+  const [tab, setTab] = useState(section.tab || 'Details')
+
+  useEffect(() => {
+    if (!editing) {
+      setLabel(section.label || '')
+      setColumns(section.columns || 3)
+      setCollapsible(section.isCollapsible)
+      setCollapsedByDefault(section.isCollapsedByDefault)
+      setTab(section.tab || 'Details')
+    }
+  }, [editing, section])
+
+  async function save() {
+    if (!label.trim()) {
+      toast.error('Section label is required')
+      return
+    }
+    setSaving(true)
+    try {
+      await updateSection(section.id, {
+        label: label.trim(),
+        columns: parseInt(columns, 10) || 3,
+        isCollapsible: collapsible,
+        isCollapsedByDefault: collapsedByDefault,
+        tab: tab.trim() || 'Details',
+      })
+      toast.success('Section updated')
+      setEditing(false)
+      await onChanged()
+    } catch (err) {
+      toast.error(`Save failed: ${err.message || err}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function confirmDelete(reason) {
+    setDeleting(true)
+    try {
+      await softDeleteSection(section.id, reason)
+      toast.success(`Deleted section "${section.label}"`)
+      setShowDeleteConfirm(false)
+      await onChanged()
+    } catch (err) {
+      toast.error(`Delete failed: ${err.message || err}`)
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <div
+      draggable={!editing && !disabled}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDragEnd={onDragEnd}
+      onDrop={onDrop}
+      style={{
+        ...cardStyle,
+        opacity: isDragging ? 0.4 : 1,
+        borderTop: isDropTarget ? `3px solid ${C.emerald}` : `1px solid ${C.border}`,
+        transition: 'opacity 0.15s, border-top 0.1s',
+      }}
+    >
+      <div style={{ ...cardHeaderStyle, gap: 10 }}>
+        {/* Drag handle */}
+        <div
+          title="Drag to reorder"
+          style={{
+            color: C.textMuted, cursor: editing ? 'default' : 'grab', padding: '2px 4px',
+            display: 'flex', alignItems: 'center',
+          }}
+        >
+          <Icon path="M4 6h16M4 12h16M4 18h16" size={14} color="currentColor" />
+        </div>
+
+        {editing ? (
+          <input
+            value={label}
+            onChange={e => setLabel(e.target.value)}
+            disabled={saving}
+            style={{ ...inputStyle, flex: 1, padding: '5px 8px', fontSize: 13 }}
+          />
+        ) : (
+          <span style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            Section {idx + 1} · {section.label || <em style={{ color: C.textMuted, fontWeight: 400 }}>Untitled</em>}
+          </span>
+        )}
+
+        <div style={{ display: 'flex', gap: 6 }}>
+          {editing ? (
+            <>
+              <button style={buttonSmSecondaryStyle} onClick={() => setEditing(false)} disabled={saving}>Cancel</button>
+              <button style={buttonSmPrimaryStyle} onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+            </>
+          ) : (
+            <>
+              <button style={buttonSmSecondaryStyle} onClick={() => setEditing(true)} disabled={disabled}>Edit</button>
+              <button
+                style={buttonSmDangerStyle}
+                onClick={() => setShowDeleteConfirm(true)}
+                disabled={disabled}
+                title="Soft-delete this section"
+              >
+                Delete
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div style={cardBodyStyle}>
+        {/* Section metadata — editable view */}
+        {editing ? (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+            gap: 14, marginBottom: 4,
+          }}>
+            <FormField label="Columns" hint="How many columns the field grid uses.">
+              <select value={columns} onChange={e => setColumns(e.target.value)} disabled={saving} style={{ ...inputStyle, cursor: 'pointer' }}>
+                <option value={1}>1</option>
+                <option value={2}>2</option>
+                <option value={3}>3</option>
+              </select>
+            </FormField>
+            <FormField label="Tab" hint="Which record detail tab this section appears on.">
+              <input value={tab} onChange={e => setTab(e.target.value)} disabled={saving} style={inputStyle} />
+            </FormField>
+            <FormField label="Collapsible">
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: C.textPrimary, cursor: 'pointer' }}>
+                <input type="checkbox" checked={collapsible} onChange={e => setCollapsible(e.target.checked)} disabled={saving} />
+                User can collapse this section
+              </label>
+            </FormField>
+            {collapsible && (
+              <FormField label="Collapsed by default">
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: C.textPrimary, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={collapsedByDefault} onChange={e => setCollapsedByDefault(e.target.checked)} disabled={saving} />
+                  Start collapsed
+                </label>
+              </FormField>
+            )}
+          </div>
+        ) : (
+          <div style={{ fontSize: 11.5, color: C.textMuted, marginBottom: 10 }}>
+            Tab: <strong style={{ color: C.textSecondary }}>{section.tab}</strong> ·
+            {' '}Columns: <strong style={{ color: C.textSecondary }}>{section.columns}</strong>
+            {section.isCollapsible && <> · <span style={{ color: C.textSecondary }}>Collapsible{section.isCollapsedByDefault ? ' (collapsed)' : ''}</span></>}
+            {' '}· {section.widgets.length} widget{section.widgets.length === 1 ? '' : 's'}
+          </div>
+        )}
+
+        {/* Widgets */}
+        <WidgetsList
+          sectionId={section.id}
+          widgets={section.widgets}
+          onChanged={onChanged}
+          disabled={disabled || editing}
+        />
+      </div>
+
+      {showDeleteConfirm && (
+        <DeleteSectionModal
+          section={section}
+          onClose={() => setShowDeleteConfirm(false)}
+          onConfirm={confirmDelete}
+          busy={deleting}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── Widgets List ──────────────────────────────────────────────────────
+
+function WidgetsList({ sectionId, widgets, onChanged, disabled }) {
+  const toast = useToast()
+  const [localWidgets, setLocalWidgets] = useState(widgets)
+  const [dragIndex, setDragIndex] = useState(null)
+  const [dragOverIndex, setDragOverIndex] = useState(null)
+  const [savingOrder, setSavingOrder] = useState(false)
+
+  useEffect(() => { setLocalWidgets(widgets) }, [widgets])
+
+  function handleDragStart(e, idx) {
+    setDragIndex(idx)
+    e.dataTransfer.effectAllowed = 'move'
+    try { e.dataTransfer.setData('text/plain', String(idx)) } catch { /* Safari */ }
+    e.stopPropagation() // don't trigger section drag
+  }
+  function handleDragOver(e, idx) {
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = 'move'
+    if (dragOverIndex !== idx) setDragOverIndex(idx)
+  }
+  function handleDragEnd(e) { e?.stopPropagation(); setDragIndex(null); setDragOverIndex(null) }
+
+  async function handleDrop(e, dropIdx) {
+    e.preventDefault()
+    e.stopPropagation()
+    const srcIdx = dragIndex
+    setDragIndex(null); setDragOverIndex(null)
+    if (srcIdx === null || srcIdx === dropIdx) return
+
+    const before = localWidgets
+    const next = [...localWidgets]
+    const [moved] = next.splice(srcIdx, 1)
+    next.splice(dropIdx, 0, moved)
+    setLocalWidgets(next)
+    setSavingOrder(true)
+    try {
+      await reorderWidgets(sectionId, next.map(w => w.id))
+      await onChanged()
+    } catch (err) {
+      toast.error(`Reorder failed: ${err.message || err}`)
+      setLocalWidgets(before)
+    } finally {
+      setSavingOrder(false)
+    }
+  }
+
+  async function handleRemove(widget) {
+    if (!window.confirm(`Remove widget "${widget.widget_title || widget.widget_type}"?`)) return
+    try {
+      await softDeleteWidget(widget.id, 'Removed via Page Layout Builder')
+      toast.success('Widget removed')
+      await onChanged()
+    } catch (err) {
+      toast.error(`Remove failed: ${err.message || err}`)
+    }
+  }
+
+  if (localWidgets.length === 0) {
+    return (
+      <div style={{
+        padding: '22px 16px', textAlign: 'center',
+        background: '#fafbfd', border: `1px dashed ${C.border}`, borderRadius: 6,
+        color: C.textMuted, fontSize: 11.5, fontStyle: 'italic',
+      }}>
+        No widgets in this section yet. Widget editors will be available in the next update.
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      {savingOrder && (
+        <div style={{ fontSize: 10.5, color: C.textMuted, fontStyle: 'italic', marginBottom: 4, textAlign: 'right' }}>
+          Saving order…
+        </div>
+      )}
+      {localWidgets.map((w, idx) => (
+        <WidgetRow
+          key={w.id}
+          widget={w}
+          isDragging={dragIndex === idx}
+          isDropTarget={dragOverIndex === idx && dragIndex !== null && dragIndex !== idx}
+          onDragStart={e => handleDragStart(e, idx)}
+          onDragOver={e => handleDragOver(e, idx)}
+          onDragEnd={handleDragEnd}
+          onDrop={e => handleDrop(e, idx)}
+          onRemove={() => handleRemove(w)}
+          disabled={disabled || savingOrder}
+        />
+      ))}
+    </div>
+  )
+}
+
+function WidgetRow({
+  widget, isDragging, isDropTarget,
+  onDragStart, onDragOver, onDragEnd, onDrop,
+  onRemove, disabled,
+}) {
+  const cfg = widget.widget_config || {}
+  const fields = Array.isArray(cfg.fields) ? cfg.fields : []
+
+  return (
+    <div
+      draggable={!disabled}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDragEnd={onDragEnd}
+      onDrop={onDrop}
+      style={{
+        background: '#fafbfd',
+        border: isDropTarget ? `2px solid ${C.emerald}` : `1px solid ${C.border}`,
+        borderRadius: 6,
+        padding: '10px 12px',
+        marginBottom: 6,
+        opacity: isDragging ? 0.4 : 1,
+        transition: 'opacity 0.15s, border 0.1s',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: fields.length > 0 || widget.widget_type === 'related_list' ? 8 : 0 }}>
+        <div style={{ color: C.textMuted, cursor: disabled ? 'default' : 'grab', padding: 2 }} title="Drag to reorder">
+          <Icon path="M4 6h16M4 12h16M4 18h16" size={13} color="currentColor" />
+        </div>
+        <span style={{
+          background: widget.widget_type === 'related_list' ? '#e8f3fb' : '#e8f8f2',
+          color: widget.widget_type === 'related_list' ? '#1a5a8a' : '#1a7a4e',
+          fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 3,
+          textTransform: 'uppercase', letterSpacing: '0.04em',
+        }}>
+          {widget.widget_type}
+        </span>
+        <span style={{ fontSize: 12.5, fontWeight: 500, color: C.textPrimary, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {widget.widget_title || widget.widget_type}
+        </span>
+        <span style={{ fontSize: 10.5, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>
+          {widget.page_layout_widget_record_number}
+        </span>
+        <button
+          style={{
+            ...buttonSmSecondaryStyle,
+            opacity: 0.5,
+            cursor: 'not-allowed',
+          }}
+          disabled
+          title="Widget contents editor arriving in the next update"
+        >
+          Edit contents
+        </button>
+        <button style={buttonSmDangerStyle} onClick={onRemove} disabled={disabled}>Remove</button>
+      </div>
+
+      {/* Inline preview — same as read-only viewer */}
+      {widget.widget_type === 'field_group' && fields.length > 0 && (
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+          gap: 5,
+        }}>
+          {fields.slice(0, 6).map((f, fi) => (
+            <div key={fi} style={{
+              background: C.card, border: `1px solid ${C.border}`, borderRadius: 4,
+              padding: '5px 9px', fontSize: 11,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              color: C.textSecondary,
+            }}>
+              <span style={{ color: C.textPrimary }}>{f.label || f.name}</span>
+              <span style={{ color: C.textMuted, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, marginLeft: 5 }}>
+                · {f.type}
+              </span>
+            </div>
+          ))}
+          {fields.length > 6 && (
+            <div style={{ fontSize: 11, color: C.textMuted, fontStyle: 'italic', alignSelf: 'center' }}>
+              +{fields.length - 6} more
+            </div>
+          )}
+        </div>
+      )}
+      {widget.widget_type === 'related_list' && (
+        <div style={{
+          background: C.card, border: `1px solid ${C.border}`, borderRadius: 4,
+          padding: '5px 9px', fontSize: 11, fontFamily: 'JetBrains Mono, monospace',
+          color: C.textSecondary,
+        }}>
+          Table: {cfg.table || '—'}
+          {cfg.fk && <> · FK: {cfg.fk}</>}
+          {Array.isArray(cfg.columns) && cfg.columns.length > 0 && <> · {cfg.columns.length} columns</>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Delete Section confirm ────────────────────────────────────────────
+
+function DeleteSectionModal({ section, onClose, onConfirm, busy }) {
+  const [reason, setReason] = useState('')
+  const reasonRef = useRef(null)
+  useEffect(() => { reasonRef.current?.focus() }, [])
+
+  return (
+    <div
+      onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose() }}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 700,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+      }}
+    >
+      <div role="dialog" aria-modal="true" style={{
+        background: C.card, borderRadius: 10, padding: 24,
+        width: 420, maxWidth: '100%',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+      }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: C.textPrimary, marginBottom: 6 }}>Delete this section?</div>
+        <div style={{ fontSize: 12.5, color: C.textSecondary, marginBottom: 14, lineHeight: 1.5 }}>
+          <strong>{section.label}</strong> and its {section.widgets.length} widget{section.widgets.length === 1 ? '' : 's'} will
+          be hidden. You can recover it from the recycle bin.
+        </div>
+        <FormField label="Reason" required>
+          <input
+            ref={reasonRef}
+            value={reason}
+            onChange={e => setReason(e.target.value)}
+            disabled={busy}
+            placeholder="e.g. Consolidated with Basic Information"
+            style={inputStyle}
+          />
+        </FormField>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button style={buttonSecondaryStyle} onClick={onClose} disabled={busy}>Cancel</button>
+          <button
+            style={{ ...buttonPrimaryStyle, background: '#b03a2e' }}
+            onClick={() => onConfirm(reason)}
+            disabled={busy || !reason.trim()}
+          >
+            {busy ? 'Deleting…' : 'Delete Section'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Danger Zone ───────────────────────────────────────────────────────
+
+function DangerZone({ layout, onDelete, busy }) {
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [reason, setReason] = useState('')
+  const reasonRef = useRef(null)
+  useEffect(() => {
+    if (showConfirm) {
+      const id = requestAnimationFrame(() => reasonRef.current?.focus())
+      return () => cancelAnimationFrame(id)
+    }
+  }, [showConfirm])
+
+  return (
+    <div style={{
+      marginTop: 24,
+      border: '1px solid #f3b9b1',
+      borderRadius: 8,
+      background: '#fdf5f3',
+      overflow: 'hidden',
+    }}>
+      <div style={{
+        padding: '11px 14px',
+        fontSize: 12.5, fontWeight: 700, color: '#8a2d20',
+        borderBottom: '1px solid #f3b9b1',
+        background: '#fdecea',
+      }}>
+        Danger Zone
+      </div>
+      <div style={{ padding: '14px' }}>
+        {!showConfirm ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 240 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: C.textPrimary, marginBottom: 2 }}>Delete this layout</div>
+              <div style={{ fontSize: 11.5, color: C.textSecondary, lineHeight: 1.5 }}>
+                Soft-deletes the layout and all its sections and widgets. Records that use this layout will fall back to the master layout.
+              </div>
+            </div>
+            <button style={buttonDangerStyle} onClick={() => setShowConfirm(true)} disabled={busy}>
+              Delete Layout
+            </button>
+          </div>
+        ) : (
+          <div>
+            <FormField label="Reason" required>
+              <input
+                ref={reasonRef}
+                value={reason}
+                onChange={e => setReason(e.target.value)}
+                disabled={busy}
+                placeholder="Why are you deleting this layout?"
+                style={inputStyle}
+              />
+            </FormField>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button style={buttonSecondaryStyle} onClick={() => setShowConfirm(false)} disabled={busy}>Cancel</button>
+              <button
+                style={{ ...buttonPrimaryStyle, background: '#b03a2e' }}
+                onClick={() => onDelete(reason.trim())}
+                disabled={busy || !reason.trim()}
+              >
+                {busy ? 'Deleting…' : 'Permanently Hide This Layout'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────
+
+function KV({ label, value, mono }) {
+  return (
+    <div style={{
+      display: 'grid', gridTemplateColumns: '140px 1fr', gap: 12,
+      padding: '7px 0',
+      borderBottom: `1px dashed ${C.border}`,
+      fontSize: 12.5,
+    }}>
+      <div style={{ color: C.textMuted, fontWeight: 500 }}>{label}</div>
+      <div style={{
+        color: C.textPrimary,
+        fontFamily: mono ? 'JetBrains Mono, monospace' : 'inherit',
+        fontSize: mono ? 11.5 : 12.5,
+      }}>{value ?? '—'}</div>
+    </div>
+  )
+}
+
+// ─── Styles ────────────────────────────────────────────────────────────
+
+const cardStyle = {
+  background: C.card,
+  border: `1px solid ${C.border}`,
+  borderRadius: 8,
+  marginBottom: 12,
+  overflow: 'hidden',
+}
+
+const cardHeaderStyle = {
+  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+  padding: '10px 14px',
+  fontSize: 12.5, fontWeight: 600, color: C.textPrimary,
+  borderBottom: `1px solid ${C.border}`, background: '#fafbfd',
+}
+
+const cardBodyStyle = {
+  padding: '10px 14px 12px',
+}

@@ -277,7 +277,13 @@ export async function fetchRecordCount(tableName, excludeDeleted = true) {
 export async function fetchPageLayoutsFor(tableName) {
   const { data, error } = await supabase
     .from('page_layouts')
-    .select('id, page_layout_record_number, page_layout_name, page_layout_object, page_layout_type, page_layout_is_default, page_layout_description, role_id, created_at, updated_at')
+    .select(`
+      id, page_layout_record_number, page_layout_name, page_layout_object,
+      page_layout_type, page_layout_is_default, page_layout_description,
+      role_id, record_type_id, created_at, updated_at,
+      role:roles!page_layouts_role_id_fkey ( id, role_name ),
+      record_type:picklist_values!page_layouts_record_type_id_fkey ( id, picklist_value, picklist_label )
+    `)
     .eq('page_layout_object', tableName)
     .eq('is_deleted', false)
     .order('page_layout_name', { ascending: true })
@@ -290,6 +296,10 @@ export async function fetchPageLayoutsFor(tableName) {
     isDefault: r.page_layout_is_default ? 'Yes' : 'No',
     description: r.page_layout_description || '—',
     updatedAt: r.updated_at ? new Date(r.updated_at).toISOString().slice(0, 10) : '—',
+    roleId: r.role_id,
+    roleName: r.role?.role_name || null,
+    recordTypeId: r.record_type_id,
+    recordTypeLabel: r.record_type?.picklist_label || r.record_type?.picklist_value || null,
   }))
 }
 
