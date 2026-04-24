@@ -1472,8 +1472,10 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     setLoading(true); setError(null)
 
     if (isCreate) {
-      // Create mode: fetch layout + picklists only, no record
-      Promise.all([fetchPageLayout(tableName), loadAllPicklists()])
+      // Create mode: fetch layout + picklists only, no record.
+      // If a record_type was pre-populated (via prefill or URL), use it to
+      // select the record-type-specific layout. Otherwise falls back to master.
+      Promise.all([fetchPageLayout(tableName, prefill?.record_type ?? null), loadAllPicklists()])
         .then(([layoutData, picklists]) => {
           if (cancelled) return
           setData({

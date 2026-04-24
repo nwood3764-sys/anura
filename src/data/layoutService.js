@@ -60,21 +60,60 @@ export async function getCurrentUserProfile() {
  * Fetch the page layout configuration for a given object.
  * Returns { layout, sections: [{ ...section, widgets: [...] }] }
  */
-export async function fetchPageLayout(objectName) {
-  // Get the default record_detail layout for this object
-  const { data: layouts, error: layoutErr } = await supabase
+export async function fetchPageLayout(objectName, recordTypeValue = null) {
+  // Resolution order:
+  //   1. If recordTypeValue is provided AND a layout exists with record_type_id
+  //      matching that picklist row → return it.
+  //   2. Otherwise return the master layout (record_type_id IS NULL).
+  //   3. If neither exists → return null (caller falls back to raw field render).
+  //
+  // We issue one query that pulls both the record-type-specific layout and
+  // the master at once, then pick the preferred one in JS. One round trip.
+
+  // Step 1 — resolve the record_type_id if a value was supplied.
+  let recordTypeId = null
+  if (recordTypeValue != null && recordTypeValue !== '') {
+    const { data: rtRows, error: rtErr } = await supabase
+      .from('picklist_values')
+      .select('id')
+      .eq('picklist_object', objectName)
+      .eq('picklist_field', 'record_type')
+      .eq('picklist_value', recordTypeValue)
+      .eq('picklist_is_active', true)
+      .limit(1)
+    if (rtErr) throw rtErr
+    if (rtRows && rtRows.length > 0) recordTypeId = rtRows[0].id
+  }
+
+  // Step 2 — fetch candidate layouts: the record-type-specific one (if any)
+  //         and the master. We filter is_default=true so there's at most one
+  //         of each per scope (enforced by page_layouts_one_default_per_scope).
+  let query = supabase
     .from('page_layouts')
     .select('*')
     .eq('page_layout_object', objectName)
     .eq('page_layout_type', 'record_detail')
     .eq('page_layout_is_default', true)
     .eq('is_deleted', false)
-    .limit(1)
 
+  if (recordTypeId) {
+    // Pull both: matching record_type_id OR master (null). PostgREST `.or()`
+    // with `is.null` covers the master side.
+    query = query.or(`record_type_id.eq.${recordTypeId},record_type_id.is.null`)
+  } else {
+    query = query.is('record_type_id', null)
+  }
+
+  const { data: layouts, error: layoutErr } = await query
   if (layoutErr) throw layoutErr
   if (!layouts || layouts.length === 0) return null
 
-  const layout = layouts[0]
+  // Step 3 — prefer the record-type-specific layout; fall back to master.
+  const layout =
+    (recordTypeId && layouts.find(l => l.record_type_id === recordTypeId)) ||
+    layouts.find(l => l.record_type_id == null) ||
+    null
+  if (!layout) return null
 
   // Get sections ordered by section_order
   const { data: sections, error: secErr } = await supabase
@@ -192,12 +231,17 @@ export async function fetchRelatedRecords(config, parentRecordId) {
  * Returns { record, layout, sections, picklists, lookups }
  */
 export async function loadRecordDetailData(tableName, recordId) {
-  // Parallel fetch: record, layout, picklists
-  const [record, layoutData, picklists] = await Promise.all([
+  // Fetch the record first — its record_type column (if present) determines
+  // which page layout to load. Picklists are independent and run in parallel
+  // with the record fetch.
+  const [record, picklists] = await Promise.all([
     fetchRecord(tableName, recordId),
-    fetchPageLayout(tableName),
     loadPicklists(),
   ])
+
+  // record_type is optional — tables without it yield `undefined`, which
+  // fetchPageLayout treats as null (master layout fallback).
+  const layoutData = await fetchPageLayout(tableName, record?.record_type ?? null)
 
   if (!layoutData) {
     return { record, layout: null, sections: [], picklists, lookups: new Map() }
