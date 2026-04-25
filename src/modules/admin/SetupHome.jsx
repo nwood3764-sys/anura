@@ -4,11 +4,12 @@ import { Icon, LoadingState, ErrorState } from '../../components/UI'
 import { ListView } from '../../components/ListView'
 import { useIsMobile } from '../../lib/useMediaQuery'
 import { SETUP_TREE } from './setupTree'
+import UsersPane from './UsersPane'
 import {
   fetchRoles, fetchPrograms, fetchWorkTypes,
   fetchEmailTemplates, fetchDocumentTemplates,
   fetchAutomationRules, fetchValidationRules,
-  fetchPicklistValues, fetchUsers, fetchAuditLog,
+  fetchPicklistValues, fetchAuditLog,
   fetchAllPageLayouts,
   fetchWorkPlanTemplates,
   fetchWorkStepTemplates,
@@ -301,7 +302,7 @@ function WelcomePane({ onOpenObjectManager }) {
 function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager }) {
   // Each node is rendered by a dedicated component that loads its own data.
   switch (nodeId) {
-    case 'users':             return <NodePage title="Users"                   table="users"             fetcher={fetchUsers}             columns={USER_COLS}           newLabel="User"             onOpenRecord={onOpenRecord} />
+    case 'users':             return <UsersPane onOpenRecord={onOpenRecord} />
     case 'roles':             return <NodePage title="Roles"                   table="roles"             fetcher={fetchRoles}             columns={ROLE_COLS}           newLabel="Role"             onOpenRecord={onOpenRecord} />
     case 'permissions':       return <PermissionsPane onOpenObjectManager={onOpenObjectManager} />
     case 'field_permissions': return <FieldPermissionsPane onOpenObjectManager={onOpenObjectManager} />
@@ -494,15 +495,8 @@ function ComingSoonPane({ label }) {
 }
 
 // ─── Column definitions for each list view ─────────────────────────────
-
-const USER_COLS = [
-  { field: 'id',        label: 'Record #', type: 'text',   sortable: true, filterable: false },
-  { field: 'name',      label: 'Name',     type: 'text',   sortable: true, filterable: true },
-  { field: 'title',     label: 'Title',    type: 'text',   sortable: true, filterable: true },
-  { field: 'email',     label: 'Email',    type: 'text',   sortable: true, filterable: true },
-  { field: 'phone',     label: 'Phone',    type: 'text',   sortable: false, filterable: false },
-  { field: 'status',    label: 'Status',   type: 'select', sortable: true, filterable: true, options: ['Active', 'Inactive'] },
-]
+// Note: Users columns live with UsersPane (their own pane handles invite
+// flow and an extra Sign-In column), so they're not declared here.
 
 const ROLE_COLS = [
   { field: 'id',          label: 'Record #',    type: 'text',   sortable: true, filterable: false },

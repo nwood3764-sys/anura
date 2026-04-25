@@ -366,10 +366,15 @@ export async function fetchPicklistsFor(tableName) {
 }
 
 // Users — for Administration > Users
+//
+// Includes the role name (joined) and a `hasAuthLink` boolean derived from
+// whether the public.users row has an `auth_user_id` set. The Users pane
+// uses `hasAuthLink` to surface a "Send invite" action for rows that exist
+// in the directory but cannot yet sign in.
 export async function fetchUsers() {
   const { data, error } = await supabase
     .from('users')
-    .select('id, user_record_number, user_first_name, user_last_name, user_email, user_phone, user_title, role_id, user_is_active, user_created_at')
+    .select('id, user_record_number, user_first_name, user_last_name, user_email, user_phone, user_title, role_id, auth_user_id, user_is_active, user_created_at, roles:role_id ( role_name )')
     .eq('user_is_deleted', false)
     .order('user_last_name', { ascending: true })
   if (error) throw error
@@ -382,8 +387,66 @@ export async function fetchUsers() {
     email: r.user_email || '—',
     phone: r.user_phone || '—',
     title: r.user_title || '—',
+    role: r.roles?.role_name || '—',
+    hasAuthLink: Boolean(r.auth_user_id),
     status: r.user_is_active ? 'Active' : 'Inactive',
   }))
+}
+
+// ---------------------------------------------------------------------------
+// User invitations
+//
+// Both functions invoke the `invite-user` Edge Function which holds the
+// service-role key server-side and performs the privileged work of creating
+// (or linking) an auth.users row and writing/updating the matching
+// public.users row. The function also sends the Supabase Auth invite email
+// so the recipient can set their own password via a one-time link.
+//
+// `inviteUser` — full new-account flow. Requires email + names + role.
+// `relinkUser` — for an existing public.users row that has no auth link
+//                yet (e.g. a seeded directory entry). Email is read from
+//                the existing row; only the user_id is required.
+// ---------------------------------------------------------------------------
+
+async function callInviteFunction(payload) {
+  const { data, error } = await supabase.functions.invoke('invite-user', {
+    body: payload,
+  })
+  // The supabase-js functions client resolves with `{ data, error }` where
+  // `error` is set on non-2xx responses. We unify the failure shape so
+  // callers get a single consistent thing to surface in the UI.
+  if (error) {
+    // Try to pull the structured error body the function returns. The SDK
+    // attaches the response on `error.context` for FunctionsHttpError.
+    let detail = null
+    try {
+      const body = await error.context?.json?.()
+      if (body?.error) detail = body.error
+      else if (body?.detail) detail = body.detail
+    } catch { /* ignore parse errors */ }
+    const message = detail || error.message || 'Invite failed'
+    throw new Error(message)
+  }
+  if (data?.error) throw new Error(data.error)
+  return data
+}
+
+export async function inviteUser({ email, firstName, lastName, roleId, title, phone }) {
+  return callInviteFunction({
+    email, first_name: firstName, last_name: lastName,
+    role_id: roleId,
+    title: title || undefined,
+    phone: phone || undefined,
+  })
+}
+
+export async function relinkUser({ existingUserId, roleId, title, phone } = {}) {
+  return callInviteFunction({
+    existing_user_id: existingUserId,
+    role_id: roleId || undefined,
+    title: title || undefined,
+    phone: phone || undefined,
+  })
 }
 
 // Audit Log — for Administration > Audit Log
